@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+#muonBDT.py - Prompt vs Non-Prompt Muon BDT Classifier
+#each comment line refers to code in the following block, in order of appearance
+
 #modules for command line argument parsing, file handling, and serialization
 import argparse
 import os
@@ -79,21 +82,37 @@ def parse_args():
     p.add_argument("--bkg-path", type=str, default=BKG_DEFAULT)
 
     #hyperparameter and feature selection
+
+    #choose number of events for training/holdout 
     p.add_argument("--n-events", type=int, default=2000,
                    help="events to load from each sample; <=0 loads all events in the file")
-    p.add_argument("--config", type=str, action="append", default=None,
-                   help="hyperparameter override string; repeat for a build-once scan")
+    
+    #build-determining hyperparameters for the feature matrix
+    #these are not changed during a build-once scan
+
+    #pT cutoff selection and neighbor cone definition; 
+    #neighbor slots are filled with tracks within this cone
     p.add_argument("--min-pt", type=float, default=1000.0)
     p.add_argument("--neighbor-dr-cut", type=float, default=0.5)
     p.add_argument("--neighbor-dz-cut", type=float, default=15.0,
                    help="|z0sinTheta_neighbor - z0sinTheta_muon| cut in mm")
     p.add_argument("--max-neighbors", type=int, default=10)
+
+    #feature block selection
     p.add_argument("--use-neighbors", type=str, default="true", choices=["true", "false"])
     p.add_argument("--use-zeta-order", type=str, default="false", choices=["true", "false"])
     p.add_argument("--d0-mode", type=str, default="both", choices=["both", "muon-off", "none"])
     p.add_argument("--use-isolation", type=str, default="true", choices=["true", "false"])
+
+    #evaluation protocol settings
     p.add_argument("--holdout-size", type=float, default=0.2)
     p.add_argument("--random-state", type=int, default=42)
+    
+    #hyperparameter override strings; can be repeated for a build-once scan
+    p.add_argument("--config", type=str, action="append", default=None,
+                   help="hyperparameter override string; repeat for a build-once scan")
+    
+    #xgboost hyperparameters; can be overridden with --config key=value,... strings
     p.add_argument("--n-estimators", type=int, default=300)
     p.add_argument("--max-depth", type=int, default=6)
     p.add_argument("--learning-rate", type=float, default=0.1)
@@ -103,6 +122,9 @@ def parse_args():
     p.add_argument("--gamma", type=float, default=0.0)
     p.add_argument("--reg-alpha", type=float, default=0.0)
     p.add_argument("--reg-lambda", type=float, default=1.0)
+    
+    #choose if the GBReweighter should be used to reweight background (pT, eta) to match signal
+    #default is true
     p.add_argument("--use-gbreweighter", type=str, default="true", choices=["true", "false"])
 
     #reweighting hyperparameters
@@ -112,7 +134,6 @@ def parse_args():
     p.add_argument("--gbrw-min-samples-leaf", type=int, default=200)
     p.add_argument("--gbrw-clip", type=float, default=100.0)
     return p.parse_args()
-
 
 #function to generate the list of feature column names
 def feature_names(K, use_neighbors, use_muon_d0, use_nbr_d0, use_isolation, use_zeta):
@@ -132,16 +153,23 @@ def feature_names(K, use_neighbors, use_muon_d0, use_nbr_d0, use_isolation, use_
 
 
 #function to build the feature matrix, one row per candidate muon (label 1=signal, 0=background)
-def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K, use_neighbors, use_muon_d0, use_nbr_d0,
-                      use_isolation, use_zeta, require_single_muon, label):
-    #column bookkeeping for the feature matrix layout (must match feature_names)
+def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K, 
+                      use_neighbors, use_muon_d0, use_nbr_d0, use_isolation, use_zeta,
+                      require_single_muon, label):
+    
+    #column book-keeping for the feature matrix layout (must match feature_names)
     n_per_slot = 5 if use_nbr_d0 else 4
     n_base = 3 + (1 if use_muon_d0 else 0) + (1 if use_isolation else 0)
     n_orderings = 2 + (1 if use_zeta else 0)
     n_cols = n_base + (n_orderings * K * n_per_slot if use_neighbors else 0)
     need_cone = use_neighbors or use_isolation
+
+    #lists to hold the feature rows, labels, and event ids for all events
+    #will be stacked at the end
     Xc, yc, ec = [], [], []
+
     #loop over events; within an event all muon-track pairs are handled with vectorized operations
+    #here eid is event number and ev is dataframe of event tracks
     for eid, ev in tqdm(df.groupby(level="entry"), desc=f"build label={label}"):
         eta = ev["InDetTrack_eta"].values
         phi = ev["InDetTrack_phi"].values
@@ -150,6 +178,7 @@ def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K, use_neighbors, use_muon_d0,
         z0a = np.abs(z0s)
         d0 = ev["InDetTrack_d0"].values
         ismu = ev["isMuon"].values == True
+        
         #skips signal events without exactly one muon; candidates are muons above the pT floor
         if require_single_muon and ismu.sum() != 1:
             continue
@@ -249,6 +278,7 @@ def compute_gb_weights(pt, eta, y, n_estimators, max_depth, learning_rate, min_s
     rw = GBReweighter(n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
                       min_samples_leaf=min_samples_leaf, gb_args={"subsample": 0.6})
     rw.fit(original=bkg_feats, target=sig_feats)
+
     #clip extreme weights so no single event dominates, then normalize background weights to mean 1
     bkg_w = np.clip(rw.predict_weights(bkg_feats), 1.0 / clip, clip)
     w = np.ones_like(y, dtype=float)
