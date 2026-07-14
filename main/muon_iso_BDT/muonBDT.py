@@ -171,6 +171,7 @@ def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K,
     #loop over events; within an event all muon-track pairs are handled with vectorized operations
     #here eid is event number and ev is dataframe of event tracks
     for eid, ev in tqdm(df.groupby(level="entry"), desc=f"build label={label}"):
+        
         eta = ev["InDetTrack_eta"].values
         phi = ev["InDetTrack_phi"].values
         pt = ev["InDetTrack_pt"].values
@@ -178,7 +179,7 @@ def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K,
         z0a = np.abs(z0s)
         d0 = ev["InDetTrack_d0"].values
         ismu = ev["isMuon"].values == True
-        
+
         #skips signal events without exactly one muon; candidates are muons above the pT floor
         if require_single_muon and ismu.sum() != 1:
             continue
