@@ -171,7 +171,8 @@ def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K,
     #loop over events; within an event all muon-track pairs are handled with vectorized operations
     #here eid is event number and ev is dataframe of event tracks
     for eid, ev in tqdm(df.groupby(level="entry"), desc=f"build label={label}"):
-        
+
+        #extracting values from the event dataframe into numpy arrays for vectorized operations
         eta = ev["InDetTrack_eta"].values
         phi = ev["InDetTrack_phi"].values
         pt = ev["InDetTrack_pt"].values
@@ -180,29 +181,46 @@ def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K,
         d0 = ev["InDetTrack_d0"].values
         ismu = ev["isMuon"].values == True
 
-        #skips signal events without exactly one muon; candidates are muons above the pT floor
+        #skips signal events without exactly one muon
+        #candidates are muons above the pT floor
         if require_single_muon and ismu.sum() != 1:
-            continue
-        usable = pt >= min_pt
-        cand = np.where(ismu & usable)[0]
+            continue #all background events are kept, even if they have multiple muons
+        usable = pt >= min_pt #qualifies muon candidates and tracks for cone membership
+
+        #cand is integer array of track indices that are muons and pass the pT floor
+        #stands for "candidate"
+        cand = np.where(ismu & usable)[0] 
+        
+        #skips empty events (no muons above the pT floor)
         if cand.size == 0:
             continue
+
+        #extract muon-level features for the candidate muons
+        #these are the first columns of the feature matrix
         eta_mu, phi_mu, z0s_mu, pt_mu = eta[cand], phi[cand], z0s[cand], pt[cand]
 
-        #cone mask (muons x tracks): deltaR cut and dz cut relative to the muon (signed z0sinTheta);
-        #each muon's own track column is excluded
+        #cone mask (muons x tracks): deltaR cut and dz cut relative to the muon (signed z0sinTheta)
+        #sub object is the cone subset itself
+        #set first to none in case neighbor features and isolation are not used (when no cone is needed)
         sub = dRc = None
         if need_cone:
             dRc = compute_deltaR_rect(eta_mu, phi_mu, eta, phi)
             dz = np.abs(z0s_mu[:, None] - z0s[None, :])
+
+            #assemble mask for tracks that are within the cone and usable
             sub = (dRc < dr_cut) & (dz < dz_cut) & usable[None, :]
+            #muon's own track is excluded
             sub[np.arange(cand.size), cand] = False
 
-        #feature rows for this event, NaN-padded (XGBoost handles NaN natively)
+        #feature rows for this event eid
+        #NaN-padded by default (XGBoost handles NaN natively) to handle absences of neighbors in the cone
         chunk = np.full((cand.size, n_cols), np.nan, dtype=np.float32)
+
         c = 0
+        #all rows, column c
         chunk[:, c] = pt_mu;       c += 1
         chunk[:, c] = eta_mu;      c += 1
+        #right now muon's transverse impact parameter is magntitude; should change this to signed
         chunk[:, c] = z0a[cand];   c += 1
         if use_muon_d0:
             chunk[:, c] = d0[cand]; c += 1
@@ -212,11 +230,16 @@ def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K,
 
         #neighbor slots: up to K cone tracks per ordering (dR ascending, pT descending, optional zeta)
         if use_neighbors and K > 0:
+            #for each ordering, sort the cone tracks and take the first K
+            #fill the neighbor slots with these tracks
             order_dr = np.argsort(np.where(sub, dRc, np.inf), axis=1, kind="stable")[:, :K]
             valid_dr = np.take_along_axis(sub, order_dr, axis=1)
+            
             pt_row = np.broadcast_to(pt[None, :], sub.shape)
+
             order_pt = np.argsort(-np.where(sub, pt_row, -np.inf), axis=1, kind="stable")[:, :K]
             valid_pt = np.take_along_axis(sub, order_pt, axis=1)
+
             groups = [(n_base, order_dr, valid_dr),
                       (n_base + K * n_per_slot, order_pt, valid_pt)]
             if use_zeta:

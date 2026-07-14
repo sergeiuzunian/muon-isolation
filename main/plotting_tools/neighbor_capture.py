@@ -7,7 +7,8 @@ import csv
 import numpy as np
 from tqdm import tqdm
 
-#muonBDT.py lives in the sibling muon_iso_BDT folder; add it to the module search path before importing
+#muonBDT.py lives in the sibling muon_iso_BDT folder
+#add it to the module search path before importing
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "muon_iso_BDT"))
 from muonBDT import load_sample, compute_deltaR_rect, SIG_DEFAULT, BKG_DEFAULT
 
