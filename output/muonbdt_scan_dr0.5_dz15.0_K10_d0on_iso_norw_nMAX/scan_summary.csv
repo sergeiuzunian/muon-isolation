@@ -1,0 +1,5 @@
+config,max_depth,n_estimators,learning_rate,reg_lambda,min_child_weight,auc_train,auc_holdout,train_holdout_gap
+cfg00_d3_n200_lr0.1_L1.0_mcw1.0,3,200,0.1,1.0,1.0,0.9103,0.8939,0.0165
+cfg01_d4_n200_lr0.1_L1.0_mcw1.0,4,200,0.1,1.0,1.0,0.9296,0.8937,0.0359
+cfg02_d6_n300_lr0.05_L3.0_mcw3.0,6,300,0.05,3.0,3.0,0.9633,0.8915,0.0718
+cfg03_d8_n400_lr0.05_L1.0_mcw1.0,8,400,0.05,1.0,1.0,0.9948,0.8809,0.1138

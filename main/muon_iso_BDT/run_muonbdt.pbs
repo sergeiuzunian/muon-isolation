@@ -1,0 +1,25 @@
+#!/bin/bash
+#PBS -N muon_bdt
+#PBS -l select=1:ncpus=1:mem=64gb
+#PBS -l walltime=12:00:00
+#PBS -q rqdf
+#PBS -o /home/suzunyan/projects/muonisolation/job_logs/
+#PBS -e /home/suzunyan/projects/muonisolation/job_logs/
+#PBS -m ae
+
+
+cd "$PBS_O_WORKDIR"
+source /home/suzunyan/.venv/bin/activate
+
+HP=(
+  --config "max_depth=4,n_estimators=200,learning_rate=0.10,reg_lambda=1,min_child_weight=1"
+  --config "max_depth=6,n_estimators=200,learning_rate=0.10,reg_lambda=1,min_child_weight=1"
+  --config "max_depth=8,n_estimators=200,learning_rate=0.10,reg_lambda=1,min_child_weight=1"
+)
+
+for d0 in both muon-off none; do
+  echo "===== d0=$d0 dR0.5 dz20 depths 4/6/8 ====="
+  python muonBDT.py --n-events 0 --d0-mode "$d0" --neighbor-dr-cut 0.5 --neighbor-dz-cut 20 --max-neighbors 10 "${HP[@]}"
+done
+
+echo "done"

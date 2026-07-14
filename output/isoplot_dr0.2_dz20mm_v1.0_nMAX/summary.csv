@@ -1,0 +1,11 @@
+key,value
+isoplot_version,1.0
+iso_dr_cut,0.2
+iso_dz_cut_mm,20
+min_pt_MeV,1000.0
+n_signal_muons,9291
+n_bkg_muons,570694
+n_signal_events,9291
+n_bkg_events,9999
+auc_isolation_cut,0.7280545451047087
+youden_iso_cut,1.6255129263437031
