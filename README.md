@@ -1,5 +1,6 @@
 main/ contains: 
 - muon_iso_BDT (xgboost classifier script), 
+- muon_iso_NN (pyTorch classifier script),
 - muon_iso_cut (cut based isolation script),
 - plotting_tools (scripts that read run outputs).
 
