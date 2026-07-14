@@ -232,16 +232,19 @@ def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K,
         if use_neighbors and K > 0:
             #for each ordering, sort the cone tracks and take the first K
             #fill the neighbor slots with these tracks
+            #dr ascending ordering
             order_dr = np.argsort(np.where(sub, dRc, np.inf), axis=1, kind="stable")[:, :K]
             valid_dr = np.take_along_axis(sub, order_dr, axis=1)
-            
-            pt_row = np.broadcast_to(pt[None, :], sub.shape)
 
+            #pT descending ordering
+            pt_row = np.broadcast_to(pt[None, :], sub.shape)
             order_pt = np.argsort(-np.where(sub, pt_row, -np.inf), axis=1, kind="stable")[:, :K]
             valid_pt = np.take_along_axis(sub, order_pt, axis=1)
 
+            #ordering groups of starting column, ranking, validity
             groups = [(n_base, order_dr, valid_dr),
                       (n_base + K * n_per_slot, order_pt, valid_pt)]
+            #optional zeta measure ordering lives here
             if use_zeta:
                 zeta = np.sqrt((dRc * 20.0) ** 2 + dz ** 2)
                 order_z = np.argsort(np.where(sub, zeta, np.inf), axis=1, kind="stable")[:, :K]
@@ -276,7 +279,8 @@ def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K,
     return np.vstack(Xc), np.concatenate(yc), np.concatenate(ec)
 
 
-#function to load track branches from a sample's root file into a dataframe; n_events <= 0 loads all
+#function to load track branches from a sample's root file into a dataframe
+#n_events <= 0 loads all
 def load_sample(path, n_events):
     f = uproot.open(path + "OutputIsolation.root:OutputIsolation")
     stop = None if n_events <= 0 else n_events
@@ -285,7 +289,8 @@ def load_sample(path, n_events):
     return ak.to_dataframe(a)
 
 
-#function to split muons into train/holdout by event id, so muons from the same event never cross the split
+#function to split muons into train/holdout by event id
+#done so muons from the same event never cross the split
 def split_by_event(X, y, eids, holdout_size, seed):
     ev = np.unique(eids)
     tr_ev, ho_ev = train_test_split(ev, test_size=holdout_size, random_state=seed)
@@ -293,7 +298,8 @@ def split_by_event(X, y, eids, holdout_size, seed):
            (X[np.isin(eids, ho_ev)], y[np.isin(eids, ho_ev)])
 
 
-#function to compute per-muon weights making background (pT, eta) match signal; fit on training data only
+#function to compute per-muon weights making background (pT, eta) match signal
+#fit on training data only
 def compute_gb_weights(pt, eta, y, n_estimators, max_depth, learning_rate, min_samples_leaf, clip):
     sig, bkg = y == 1, y == 0
     sig_feats = np.column_stack([pt[sig], eta[sig]])
@@ -303,15 +309,16 @@ def compute_gb_weights(pt, eta, y, n_estimators, max_depth, learning_rate, min_s
                       min_samples_leaf=min_samples_leaf, gb_args={"subsample": 0.6})
     rw.fit(original=bkg_feats, target=sig_feats)
 
-    #clip extreme weights so no single event dominates, then normalize background weights to mean 1
+    #clip extreme weights so no single event dominates
+    #normalize background weights to mean 1
     bkg_w = np.clip(rw.predict_weights(bkg_feats), 1.0 / clip, clip)
     w = np.ones_like(y, dtype=float)
     w[bkg] = bkg_w
     w[bkg] /= w[bkg].mean()
     return w
 
-
 #function to compute the Kolmogorov-Smirnov statistic between two weighted samples (after-reweighting check)
+#using this for generated csv file to check if reweighting worked
 def weighted_ks(x1, w1, x2, w2):
     xs = np.concatenate([x1, x2])
     ws1 = np.concatenate([w1, np.zeros_like(x2)])
@@ -321,8 +328,8 @@ def weighted_ks(x1, w1, x2, w2):
     c2 = np.cumsum(ws2[order]) / ws2.sum()
     return float(np.max(np.abs(c1 - c2)))
 
-
 #function to sum feature importances over the K slots of each neighbor (variable, ordering) group
+#otherwise there would over a hundred feature importances
 def aggregate_neighbor_importances(feature_names, importances):
     base_pairs, nbr_buckets, per_slot_rows = [], {}, []
     for name, imp in zip(feature_names, importances):
@@ -335,8 +342,8 @@ def aggregate_neighbor_importances(feature_names, importances):
             per_slot_rows.append((name, None, float(imp)))
     return base_pairs + sorted(nbr_buckets.items(), key=lambda kv: -kv[1]), per_slot_rows
 
-
-#function to plot train and holdout roc curves with Youden J operating points; returns both auc values
+#function to plot train and holdout roc curves
+#uses Youden J operating points; returns both auc values
 def plot_roc(y_train, proba_train, y_hold, proba_hold, plot_dir, settings_str):
     fpr_tr, tpr_tr, th_tr = roc_curve(y_train, proba_train)
     auc_tr = float(auc(fpr_tr, tpr_tr)); k_tr = int(np.argmax(tpr_tr - fpr_tr))
@@ -361,7 +368,8 @@ def plot_roc(y_train, proba_train, y_hold, proba_hold, plot_dir, settings_str):
                             "train_J": float(tpr_tr[k_tr] - fpr_tr[k_tr]), "hold_J": float(tpr_ho[k_ho] - fpr_ho[k_ho])}
 
 
-#function to plot feature importances (neighbor groups summed) and write the per-slot csv
+#function to plot feature importances (neighbor groups summed)
+#also writes per-slot csv
 def plot_feature_importances(model, names, n_events, label, plot_dir, settings_str):
     group_pairs, per_slot_rows = aggregate_neighbor_importances(names, model.feature_importances_)
     group_pairs.sort(key=lambda kv: -kv[1])
@@ -672,7 +680,7 @@ def main():
         with open(os.path.join(out_dir, "model.pkl"), "wb") as fh:
             pickle.dump(clf, fh)
             
-        #write all settings and results to summary.csv (harvested later by summarize_runs.py)
+        #write all settings and results to summary.csv (used by summarize_runs.py additional plotting script)
         with open(os.path.join(out_dir, "summary.csv"), "w", newline="") as fh:
             wcsv = csv.writer(fh); wcsv.writerow(["key", "value"])
             rows = [("muonbdt_version", VERSION),

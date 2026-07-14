@@ -1,0 +1,29 @@
+#!/bin/bash
+#PBS -N muon_nn
+#PBS -l select=1:ncpus=1:mem=64gb
+#PBS -l walltime=06:00:00
+#PBS -q rqdf
+#PBS -o /home/suzunyan/projects/muonisolation/job_logs/
+#PBS -e /home/suzunyan/projects/muonisolation/job_logs/
+#PBS -m ae
+
+#muonNN.py - pytorch classifier for prompt vs non-prompt muons
+#current job: all events at the physical cone (dR0.5, dz10, K10), reweighter on, 20 epochs,
+#looks like epochs=20 is enough for convergence; will increase
+#20-20 network 
+
+cd "$PBS_O_WORKDIR"
+source /home/suzunyan/.venv/bin/activate
+export OMP_NUM_THREADS=1
+
+python muonNN.py \
+  --n-events 0 \
+  --neighbor-dr-cut 0.5 \
+  --neighbor-dz-cut 10 \
+  --max-neighbors 10 \
+  --use-gbreweighter true \
+  --epochs 50 \
+  --batch-size 512 \
+  --learning-rate 0.001
+
+echo "done"
