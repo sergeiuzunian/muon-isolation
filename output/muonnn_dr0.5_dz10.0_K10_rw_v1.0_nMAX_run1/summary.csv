@@ -1,0 +1,16 @@
+key,value
+muonnn_version,1.0
+model_type,mlp
+n_events_requested,0
+min_pt_MeV,1000.0
+neighbor_dr_cut,0.5
+neighbor_dz_cut_mm,10.0
+max_neighbors_K,10
+use_gbreweighter,True
+n_train,465378
+n_holdout,114607
+epochs,50
+batch_size,512
+learning_rate,0.001
+auc_train,0.9002480062998764
+auc_holdout,0.8503586012711197

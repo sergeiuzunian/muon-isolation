@@ -1,29 +1,33 @@
 #!/bin/bash
 #PBS -N muon_nn
 #PBS -l select=1:ncpus=1:mem=64gb
-#PBS -l walltime=06:00:00
+#PBS -l walltime=20:00:00
 #PBS -q rqdf
 #PBS -o /home/suzunyan/projects/muonisolation/job_logs/
 #PBS -e /home/suzunyan/projects/muonisolation/job_logs/
 #PBS -m ae
 
 #muonNN.py - pytorch classifier for prompt vs non-prompt muons
-#current job: all events at the physical cone (dR0.5, dz10, K10), reweighter on, 20 epochs,
-#looks like epochs=20 is enough for convergence; will increase
-#20-20 network 
+#current job: phase 1 learning-rate scan at the best-known config
+#dR0.5, dz10, K10, d0 both, iso on, reweight on, 100 epochs
+#lr in {3e-4, 1e-3, 3e-3}; per-epoch train + holdout loss curves
 
 cd "$PBS_O_WORKDIR"
 source /home/suzunyan/.venv/bin/activate
 export OMP_NUM_THREADS=1
 
-python muonNN.py \
-  --n-events 0 \
-  --neighbor-dr-cut 0.5 \
-  --neighbor-dz-cut 10 \
-  --max-neighbors 10 \
-  --use-gbreweighter true \
-  --epochs 50 \
-  --batch-size 512 \
-  --learning-rate 0.001
+for lr in 0.0003 0.001 0.003; do
+  echo "===== lr=$lr dR0.5 dz10 K10 d0on 100 epochs ====="
+  python muonNN.py \
+    --n-events 0 \
+    --d0-mode both \
+    --neighbor-dr-cut 0.5 \
+    --neighbor-dz-cut 10 \
+    --max-neighbors 10 \
+    --use-gbreweighter true \
+    --epochs 100 \
+    --batch-size 512 \
+    --learning-rate $lr
+done
 
 echo "done"

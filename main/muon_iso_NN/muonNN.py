@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
 
-#note: work in progress. Not yet fully tested/ optimized. 
-#goals:
-# - add run settings box, include network architecture and training settings
-# - add loss vs epoch plot
-# - add option to turn d0 off for muons/ neighboring tracks
-
 #modules for command line argument parsing and file handling
 import argparse
 import os
@@ -38,10 +32,6 @@ BKG_DEFAULT = "/lstr/sahara/niueftracking/kesedlac/muon_isolation/OUTPUT/run_bje
 #muonNN.py version for keeping track of run data relative to script edits
 VERSION = "1.0"
 
-#number of neighbor variables per slot (d0, pt, deta, deltaR, dz0sintheta) and orderings (dR, pT)
-N_PER_SLOT = 5
-N_ORDERINGS = 2
-
 #function to compute deltaR between muons and other tracks; copied from muonBDT.py
 def compute_deltaR_rect(eta_mu, phi_mu, eta, phi):
     d_eta = eta_mu[:, None] - eta[None, :]
@@ -60,13 +50,18 @@ def load_sample(path, n_events):
                   "InDetTrack_z0sinTheta", "InDetTrack_d0", "isMuon"], entry_stop=stop)
     return ak.to_dataframe(a)
 
-#function to build the feature matrix, one row per candidate muon
-#for now simplified copy of the one in muonBDT.py with
-#default feature set fixed (muon pt, eta, |z0sinTheta|, d0, isolation and
-#K neighbor slots per ordering)
-#uses zeros instead of nan for empty slots
-def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K, require_single_muon, label):
-    n_cols = 5 + N_ORDERINGS * K * N_PER_SLOT
+#function to build the feature matrix, one row per candidate muon (label 1=signal, 0=background)
+#zero-padded version of the muonBDT.py builder, with the same feature switches
+def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K,
+                      use_neighbors, use_muon_d0, use_nbr_d0, use_isolation, use_zeta,
+                      require_single_muon, label):
+
+    #column book-keeping for the feature matrix layout
+    n_per_slot = 5 if use_nbr_d0 else 4
+    n_base = 3 + (1 if use_muon_d0 else 0) + (1 if use_isolation else 0)
+    n_orderings = 2 + (1 if use_zeta else 0)
+    n_cols = n_base + (n_orderings * K * n_per_slot if use_neighbors else 0)
+    need_cone = use_neighbors or use_isolation
     Xc, yc, ec = [], [], []
     for eid, ev in tqdm(df.groupby(level="entry"), desc=f"build label={label}"):
         eta = ev["InDetTrack_eta"].values
@@ -87,44 +82,57 @@ def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K, require_single_muon, label)
 
         #cone mask (muons x tracks): deltaR cut and dz cut relative to the muon (signed z0sinTheta);
         #each muon's own track column is excluded
-        dRc = compute_deltaR_rect(eta_mu, phi_mu, eta, phi)
-        dz = np.abs(z0s_mu[:, None] - z0s[None, :])
-        sub = (dRc < dr_cut) & (dz < dz_cut) & usable[None, :]
-        sub[np.arange(cand.size), cand] = False
+        sub = dRc = dz = None
+        if need_cone:
+            dRc = compute_deltaR_rect(eta_mu, phi_mu, eta, phi)
+            dz = np.abs(z0s_mu[:, None] - z0s[None, :])
+            sub = (dRc < dr_cut) & (dz < dz_cut) & usable[None, :]
+            sub[np.arange(cand.size), cand] = False
 
         #feature rows for this event, zero-padded
         chunk = np.zeros((cand.size, n_cols), dtype=np.float32)
-        chunk[:, 0] = pt_mu
-        chunk[:, 1] = eta_mu
-        chunk[:, 2] = np.abs(z0s_mu)
-        chunk[:, 3] = d0[cand]
+        c = 0
+        chunk[:, c] = pt_mu;          c += 1
+        chunk[:, c] = eta_mu;         c += 1
+        chunk[:, c] = np.abs(z0s_mu); c += 1
+        if use_muon_d0:
+            chunk[:, c] = d0[cand];   c += 1
 
         #relative track isolation = sum of cone track pT / muon pT
-        chunk[:, 4] = (pt[None, :] * sub).sum(axis=1) / pt_mu
+        if use_isolation:
+            chunk[:, c] = (pt[None, :] * sub).sum(axis=1) / pt_mu; c += 1
 
-        #neighbor slots: K nearest cone tracks (dR ascending) and K hardest (pT descending)
-        order_dr = np.argsort(np.where(sub, dRc, np.inf), axis=1, kind="stable")[:, :K]
-        valid_dr = np.take_along_axis(sub, order_dr, axis=1)
-        pt_row = np.broadcast_to(pt[None, :], sub.shape)
-        order_pt = np.argsort(-np.where(sub, pt_row, -np.inf), axis=1, kind="stable")[:, :K]
-        valid_pt = np.take_along_axis(sub, order_pt, axis=1)
+        #neighbor slots per ordering: dR ascending, pT descending, optional zeta ascending
+        if use_neighbors and K > 0:
+            order_dr = np.argsort(np.where(sub, dRc, np.inf), axis=1, kind="stable")[:, :K]
+            valid_dr = np.take_along_axis(sub, order_dr, axis=1)
+            pt_row = np.broadcast_to(pt[None, :], sub.shape)
+            order_pt = np.argsort(-np.where(sub, pt_row, -np.inf), axis=1, kind="stable")[:, :K]
+            valid_pt = np.take_along_axis(sub, order_pt, axis=1)
+            groups = [(n_base, order_dr, valid_dr),
+                      (n_base + K * n_per_slot, order_pt, valid_pt)]
+            if use_zeta:
+                #zeta = sqrt((20*deltaR)^2 + dz^2), combined angular and longitudinal distance
+                zeta = np.sqrt((dRc * 20.0) ** 2 + dz ** 2)
+                order_z = np.argsort(np.where(sub, zeta, np.inf), axis=1, kind="stable")[:, :K]
+                valid_z = np.take_along_axis(sub, order_z, axis=1)
+                groups.append((n_base + 2 * K * n_per_slot, order_z, valid_z))
 
-        for base, order, valid in ((5, order_dr, valid_dr), (5 + K * N_PER_SLOT, order_pt, valid_pt)):
-            d0_g = d0[order].astype(np.float32)
-            pt_g = pt[order].astype(np.float32)
-            deta_g = (eta[order] - eta_mu[:, None]).astype(np.float32)
-            dr_g = np.take_along_axis(dRc, order, axis=1).astype(np.float32)
-            dz_g = (z0s[order] - z0s_mu[:, None]).astype(np.float32)
+            for base, order, valid in groups:
+                pt_g = pt[order].astype(np.float32)
+                deta_g = (eta[order] - eta_mu[:, None]).astype(np.float32)
+                dr_g = np.take_along_axis(dRc, order, axis=1).astype(np.float32)
+                dz_g = (z0s[order] - z0s_mu[:, None]).astype(np.float32)
+                gathered = [pt_g, deta_g, dr_g, dz_g]
+                if use_nbr_d0:
+                    gathered = [d0[order].astype(np.float32)] + gathered
 
-            #zero out the slots that are not real cone tracks (after the relative subtractions)
-            for g in (d0_g, pt_g, deta_g, dr_g, dz_g):
-                g[~valid] = 0.0
-            end = base + K * N_PER_SLOT
-            chunk[:, base + 0:end:N_PER_SLOT] = d0_g
-            chunk[:, base + 1:end:N_PER_SLOT] = pt_g
-            chunk[:, base + 2:end:N_PER_SLOT] = deta_g
-            chunk[:, base + 3:end:N_PER_SLOT] = dr_g
-            chunk[:, base + 4:end:N_PER_SLOT] = dz_g
+                #zero out the slots that are not real cone tracks (after the relative subtractions)
+                for g in gathered:
+                    g[~valid] = 0.0
+                end = base + K * n_per_slot
+                for fo, g in enumerate(gathered):
+                    chunk[:, base + fo:end:n_per_slot] = g
 
         Xc.append(chunk)
         yc.append(np.full(cand.size, label, dtype=np.int64))
@@ -134,20 +142,19 @@ def build_muon_matrix(df, min_pt, dr_cut, dz_cut, K, require_single_muon, label)
         return np.empty((0, n_cols), np.float32), np.empty(0, np.int64), np.empty(0, np.int64)
     return np.vstack(Xc), np.concatenate(yc), np.concatenate(ec)
 
-#function to compute per-muon weights making background (pT, eta) match signal; copied from
-#muonBDT.py with the reweighter settings fixed (80 trees, depth 3, lr 0.1, min leaf 200, clip 100)
-def compute_gb_weights(pt, eta, y):
+#function to compute per-muon weights making background (pT, eta) match signal; copied from muonBDT.py
+def compute_gb_weights(pt, eta, y, n_estimators, max_depth, learning_rate, min_samples_leaf, clip):
     sig, bkg = y == 1, y == 0
     sig_feats = np.column_stack([pt[sig], eta[sig]])
     bkg_feats = np.column_stack([pt[bkg], eta[bkg]])
     print(f"  fitting GBReweighter: n_sig={sig.sum()}, n_bkg={bkg.sum()}")
-    rw = GBReweighter(n_estimators=80, max_depth=3, learning_rate=0.1,
-                      min_samples_leaf=200, gb_args={"subsample": 0.6})
+    rw = GBReweighter(n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
+                      min_samples_leaf=min_samples_leaf, gb_args={"subsample": 0.6})
     rw.fit(original=bkg_feats, target=sig_feats)
 
-    #clip extreme weights (no single event dominates) 
+    #clip extreme weights (no single event dominates)
     #normalize background weights to mean 1
-    bkg_w = np.clip(rw.predict_weights(bkg_feats), 0.01, 100.0)
+    bkg_w = np.clip(rw.predict_weights(bkg_feats), 1.0 / clip, clip)
     w = np.ones_like(y, dtype=np.float32)
     w[bkg] = bkg_w
     w[bkg] /= w[bkg].mean()
@@ -162,6 +169,12 @@ def split_by_event(X, y, eids, holdout_size, seed):
            (X[np.isin(eids, ho_ev)], y[np.isin(eids, ho_ev)])
 
 
+#function to stamp run settings information box at the bottom of plots; copied from muonBDT.py
+def add_settings_box(fig, settings_str):
+    fig.text(0.01, -0.03, settings_str, ha="left", va="top", fontsize=8, family="monospace",
+             bbox=dict(boxstyle="round,pad=0.6", facecolor="whitesmoke", edgecolor="gray"))
+
+
 #function to parse command line arguments for sample paths, cone cuts, and training settings
 def parse_args():
     p = argparse.ArgumentParser(description="Prompt vs Non-Prompt Muon NN Classifier")
@@ -169,21 +182,43 @@ def parse_args():
     p.add_argument("--bkg-path", type=str, default=BKG_DEFAULT)
     p.add_argument("--n-events", type=int, default=2000,
                    help="events to load from each sample; <=0 loads all events in the file")
+    
+    #pT cutoff selection and neighbor cone definition, same as muonBDT.py
     p.add_argument("--min-pt", type=float, default=1000.0)
     p.add_argument("--neighbor-dr-cut", type=float, default=0.5)
-    p.add_argument("--neighbor-dz-cut", type=float, default=15.0)
+    p.add_argument("--neighbor-dz-cut", type=float, default=15.0,
+                   help="|z0sinTheta_neighbor - z0sinTheta_muon| cut in mm")
     p.add_argument("--max-neighbors", type=int, default=10)
-    p.add_argument("--use-gbreweighter", type=str, default="true", choices=["true", "false"])
+
+    #feature block selection, same as muonBDT.py
+    p.add_argument("--use-neighbors", type=str, default="true", choices=["true", "false"])
+    p.add_argument("--use-zeta-order", type=str, default="false", choices=["true", "false"])
+    p.add_argument("--d0-mode", type=str, default="both", choices=["both", "muon-off", "none"])
+    p.add_argument("--use-isolation", type=str, default="true", choices=["true", "false"])
+
+    #evaluation protocol settings
     p.add_argument("--holdout-size", type=float, default=0.2)
     p.add_argument("--random-state", type=int, default=42)
+
+    #network training settings
     p.add_argument("--epochs", type=int, default=20)
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--learning-rate", type=float, default=0.001)
+
+    #choose if the GBReweighter should be used to reweight background (pT, eta) to match signal
+    p.add_argument("--use-gbreweighter", type=str, default="true", choices=["true", "false"])
+
+    #reweighting hyperparameters, same as muonBDT.py
+    p.add_argument("--gbrw-n-estimators", type=int, default=80)
+    p.add_argument("--gbrw-max-depth", type=int, default=3)
+    p.add_argument("--gbrw-learning-rate", type=float, default=0.1)
+    p.add_argument("--gbrw-min-samples-leaf", type=int, default=200)
+    p.add_argument("--gbrw-clip", type=float, default=100.0)
     return p.parse_args()
 
 
 #network architecture
-#105 inputs -> 20 -> 20 -> 1 output (~2.5k parameters, sized for ~20k events)
+#105 inputs -> 20 -> 20 -> 1 output 
 class MLP(nn.Module):
     def __init__(self, n_in):
         super().__init__()
@@ -195,10 +230,32 @@ class MLP(nn.Module):
         return self.net(x).squeeze(-1)
 
 
+#function to plot training and holdout loss versus epoch
+def plot_loss_vs_epoch(train_losses, hold_losses, out_dir, settings_str):
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ep = range(1, len(train_losses) + 1)
+    ax.plot(ep, train_losses, "o-", color="steelblue", lw=2, label="Training Loss (Weighted)")
+    ax.plot(ep, hold_losses, "o-", color="darkorange", lw=2, label="Holdout Loss (Weighted)")
+    ax.set_xlabel("Epoch", fontsize=12)
+    ax.set_ylabel("Binary Cross-Entropy Loss", fontsize=12)
+    ax.set_title("Training and Holdout Loss vs Epoch", fontsize=12)
+    ax.legend(fontsize=10); ax.grid(alpha=0.3)
+    plt.tight_layout(); add_settings_box(fig, settings_str)
+    plt.savefig(os.path.join(out_dir, "loss_vs_epoch.png"), dpi=150, bbox_inches="tight"); plt.close()
+
+
 def main():
     args = parse_args()
     torch.manual_seed(args.random_state)
+
+    #convert string flags to booleans; d0-mode sets the muon and neighbor d0 switches
+    use_neighbors = args.use_neighbors == "true"
     use_gbrw = args.use_gbreweighter == "true"
+    d0_mode = args.d0_mode
+    use_muon_d0 = d0_mode == "both"
+    use_nbr_d0 = d0_mode in ("both", "muon-off")
+    use_isolation = args.use_isolation == "true"
+    use_zeta = args.use_zeta_order == "true"
     K = args.max_neighbors
     ev_tag = "MAX" if args.n_events <= 0 else str(args.n_events)
 
@@ -207,13 +264,19 @@ def main():
     print("loading + building signal (run_InvPtPU200)...")
     df = load_sample(args.signal_path, args.n_events)
     Xs, ys, es = build_muon_matrix(df, args.min_pt, args.neighbor_dr_cut, args.neighbor_dz_cut,
-                                   K, require_single_muon=True, label=1)
+                                   K, use_neighbors, use_muon_d0, use_nbr_d0, use_isolation,
+                                   use_zeta, require_single_muon=True, label=1)
     del df
     print("loading + building background (run_bjet)...")
     df = load_sample(args.bkg_path, args.n_events)
     Xb, yb, eb = build_muon_matrix(df, args.min_pt, args.neighbor_dr_cut, args.neighbor_dz_cut,
-                                   K, require_single_muon=False, label=0)
+                                   K, use_neighbors, use_muon_d0, use_nbr_d0, use_isolation,
+                                   use_zeta, require_single_muon=False, label=0)
     del df
+
+    n_sig_ev = int(len(np.unique(es))); n_bkg_ev = int(len(np.unique(eb)))
+    print(f"signal: {n_sig_ev:,} events -> {len(ys):,} muons | "
+          f"background: {n_bkg_ev:,} events -> {len(yb):,} muons")
 
     #event-level train/holdout split for each sample, then combined
     (Xs_tr, ys_tr), (Xs_ho, ys_ho) = split_by_event(Xs, ys, es, args.holdout_size, args.random_state)
@@ -226,11 +289,14 @@ def main():
     #background (pT, eta) reweighting, fit on the raw training columns before standardization
     w = np.ones_like(y_train, dtype=np.float32)
     if use_gbrw:
-        w = compute_gb_weights(X_train[:, 0], X_train[:, 1], y_train)
+        w = compute_gb_weights(X_train[:, 0], X_train[:, 1], y_train, args.gbrw_n_estimators,
+                               args.gbrw_max_depth, args.gbrw_learning_rate,
+                               args.gbrw_min_samples_leaf, args.gbrw_clip)
 
     #class imbalance: upweight signal by n_bkg/n_sig on top of the reweighter weights
+    spw = n_bkg_tr / max(n_sig_tr, 1)
     final_w = w.copy()
-    final_w[y_train == 1] *= n_bkg_tr / max(n_sig_tr, 1)
+    final_w[y_train == 1] *= spw
 
     #standardize each feature with training statistics only
     mu = X_train.mean(axis=0)
@@ -240,6 +306,34 @@ def main():
     X_hold = (X_hold - mu) / sd
 
     model = MLP(X_train.shape[1])
+    n_params = sum(p.numel() for p in model.parameters())
+
+    #run settings text for the plot settings boxes; _row pads labels so the box lines up as a table
+    def _row(lbl, val): return f"{lbl:<14}: {val}"
+    settings_data = "\n".join([
+        f"RUN SETTINGS   (muonNN.py v{VERSION})",
+        _row("Samples", "signal=run_InvPtPU200 (prompt), bkg=run_bjet (non-prompt); label=provenance"),
+        _row("Candidates", f"muons (isMuon), pT >= {args.min_pt/1000:.1f} GeV; bkg all muons/event, signal 1/event"),
+        _row("Features", f"muon pT, eta, |z0sinθ|" + (", d0 (signed)" if use_muon_d0 else " (muon d0 off)")
+                         + (", isolation" if use_isolation else "")
+                         + "; neighbors carry " + ("d0, " if use_nbr_d0 else "") + "pt, Δeta, ΔR, Δz0sinθ"
+                         + f"  [d0-mode={d0_mode}]"),
+        _row("Isolation", (f"ΣpT(cone tracks)/pT(muon); cone = dR<{args.neighbor_dr_cut} and "
+                           f"|z0sinθ_track-z0sinθ_muon|<{args.neighbor_dz_cut}mm, pT>=1 GeV, muon excluded")
+                          if use_isolation else "off"),
+        _row("Neighbors", (f"<=K={K} same-event tracks, dR<{args.neighbor_dr_cut} and "
+                           f"|Δz0sinθ|<{args.neighbor_dz_cut}mm (signed vertex sep); "
+                           f"dR-asc, pT-desc" + (", ζ-asc" if use_zeta else "") + "; zero-padded")
+                          if use_neighbors else "off"),
+        _row("Network", f"MLP {X_train.shape[1]}->20->20->1, ReLU, {n_params} parameters"),
+        _row("Training", f"Adam lr={args.learning_rate}, batch={args.batch_size}, epochs={args.epochs}; "
+                         f"inputs standardized with training statistics"),
+        _row("Reweighting", "GBReweighter (pT,eta) bkg->signal, train only" if use_gbrw else "off"),
+        _row("Imbalance", f"scale_pos_weight={spw:.2f} on signal"),
+        _row("Events", f"signal {n_sig_ev:,} events / {len(ys):,} muons, "
+                       f"background {n_bkg_ev:,} events / {len(yb):,} muons"),
+        _row("Train/holdout", f"{len(y_train):,} / {len(y_hold):,} muons (80/20 split by event)"),
+    ])
 
     #per-sample weighted loss
     #reduction none keeps one loss per muon, multiplied by its weight
@@ -251,6 +345,18 @@ def main():
                                         torch.from_numpy(y_train.astype(np.float32)),
                                         torch.from_numpy(final_w))
     dl = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=True)
+
+    #holdout tensors and weights for the per-epoch holdout loss
+    #same class-imbalance weighting as training (spw on signal) so the two curves share a scale;
+    #reweighter weights are train-only and not applied here
+    Xh_t = torch.from_numpy(X_hold)
+    yh_t = torch.from_numpy(y_hold.astype(np.float32))
+    wh = np.ones_like(y_hold, dtype=np.float32)
+    wh[y_hold == 1] *= spw
+    wh_t = torch.from_numpy(wh)
+
+    train_losses = []
+    hold_losses = []
     model.train()
     for epoch in range(args.epochs):
         total = 0.0
@@ -260,7 +366,12 @@ def main():
             loss.backward()
             opt.step()
             total += float(loss) * len(yb_)
-        print(f"epoch {epoch+1}/{args.epochs}  loss {total/len(ds):.4f}")
+        train_losses.append(total / len(ds))
+        model.eval()
+        with torch.no_grad():
+            hold_losses.append(float((lossf(model(Xh_t), yh_t) * wh_t).mean()))
+        model.train()
+        print(f"epoch {epoch+1}/{args.epochs}  loss {train_losses[-1]:.4f} | holdout loss {hold_losses[-1]:.4f}")
 
     #evaluate scores for train and holdout, roc curves and auc
     model.eval()
@@ -273,16 +384,22 @@ def main():
     auc_ho = float(auc(fpr_ho, tpr_ho))
     print(f"auc train {auc_tr:.4f} | holdout {auc_ho:.4f} | gap {auc_tr-auc_ho:.4f}")
 
-    #output directory; suffix _runN avoids overwriting an existing one
+    #output directory; name encodes the cone, feature, and reweighting settings, same as muonBDT.py
+    #suffix _runN avoids overwriting an existing one
     #project root is three levels up from this file (muonisolation/main/muon_iso_NN/)
     output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "output")
-    rw_tag = "_rw" if use_gbrw else "_norw"
-    base = os.path.join(output_dir, f"muonnn_dr{args.neighbor_dr_cut}_dz{args.neighbor_dz_cut}_K{K}{rw_tag}_v{VERSION}_n{ev_tag}")
+    nbr_str = f"dr{args.neighbor_dr_cut}_dz{args.neighbor_dz_cut}_K{K}" if use_neighbors else "noNbr"
+    nbr_str += {"both": "_d0on", "muon-off": "_d0muOFF", "none": "_d0off"}[d0_mode]
+    nbr_str += "_iso" if use_isolation else "_noiso"
+    nbr_str += "_zeta" if use_zeta else ""
+    nbr_str += "_rw" if use_gbrw else "_norw"
+    base = os.path.join(output_dir, f"muonnn_{nbr_str}_v{VERSION}_n{ev_tag}")
     out = base; i = 0
     while os.path.exists(out):
         i += 1; out = f"{base}_run{i}"
     os.makedirs(out)
     print(f"output dir: {out}")
+
 
     #roc plot plotting
     fig, ax = plt.subplots(figsize=(8, 7))
@@ -293,8 +410,11 @@ def main():
     ax.set_ylabel("True Positive Rate (Prompt Muons Correctly Identified)", fontsize=11)
     ax.set_title("Prompt vs Non-Prompt Muon NN Classifier — ROC", fontsize=12)
     ax.legend(loc="lower right", fontsize=9); ax.grid(alpha=0.3)
-    plt.tight_layout()
+    plt.tight_layout(); add_settings_box(fig, settings_data)
     plt.savefig(os.path.join(out, "roc.png"), dpi=150, bbox_inches="tight"); plt.close()
+
+    #loss vs epoch plot
+    plot_loss_vs_epoch(train_losses, hold_losses, out, settings_data)
 
     #saves the trained network and a summary of settings and results
     torch.save(model.state_dict(), os.path.join(out, "model.pt"))
@@ -303,8 +423,14 @@ def main():
         for k, v in [("muonnn_version", VERSION), ("model_type", "mlp"),
                      ("n_events_requested", args.n_events), ("min_pt_MeV", args.min_pt),
                      ("neighbor_dr_cut", args.neighbor_dr_cut), ("neighbor_dz_cut_mm", args.neighbor_dz_cut),
-                     ("max_neighbors_K", K), ("use_gbreweighter", use_gbrw),
-                     ("n_train", len(y_train)), ("n_holdout", len(y_hold)),
+                     ("max_neighbors_K", K), ("use_neighbors", use_neighbors),
+                     ("use_zeta_order", use_zeta),
+                     ("d0_mode", d0_mode), ("use_muon_d0", use_muon_d0), ("use_nbr_d0", use_nbr_d0),
+                     ("use_isolation", use_isolation), ("use_gbreweighter", use_gbrw),
+                     ("n_features", X_train.shape[1]),
+                     ("n_signal_events", n_sig_ev), ("n_bkg_events", n_bkg_ev),
+                     ("n_signal_muons", len(ys)), ("n_bkg_muons", len(yb)),
+                     ("n_train", len(y_train)), ("n_holdout", len(y_hold)), ("scale_pos_weight", spw),
                      ("epochs", args.epochs), ("batch_size", args.batch_size),
                      ("learning_rate", args.learning_rate),
                      ("auc_train", auc_tr), ("auc_holdout", auc_ho)]:

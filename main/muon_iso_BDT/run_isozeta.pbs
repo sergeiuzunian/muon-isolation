@@ -1,0 +1,30 @@
+#!/bin/bash
+#PBS -N bdt_isozeta
+#PBS -l select=1:ncpus=1:mem=64gb
+#PBS -l walltime=06:00:00
+#PBS -q rqdf
+#PBS -o /home/suzunyan/projects/muonisolation/job_logs/
+#PBS -e /home/suzunyan/projects/muonisolation/job_logs/
+#PBS -m ae
+
+#isolation-scalar and zeta-ordering contribution at the physical cone (dR0.5, dz10, d0 both)
+#baseline (iso on, no zeta) already exists: holdout AUC 0.8822
+
+cd "$PBS_O_WORKDIR"
+source /home/suzunyan/.venv/bin/activate
+
+HP=(
+  --config "max_depth=2,n_estimators=200,learning_rate=0.10,reg_lambda=1,min_child_weight=1"
+  --config "max_depth=3,n_estimators=200,learning_rate=0.10,reg_lambda=1,min_child_weight=1"
+  --config "max_depth=4,n_estimators=200,learning_rate=0.10,reg_lambda=1,min_child_weight=1"
+)
+
+echo "===== d0on dR0.5 dz10 : ISOLATION OFF (isolation-scalar contribution) ====="
+python muonBDT.py --n-events 0 --d0-mode both --neighbor-dr-cut 0.5 --neighbor-dz-cut 10 \
+  --max-neighbors 10 --use-isolation false --use-gbreweighter true "${HP[@]}"
+
+echo "===== d0on dR0.5 dz10 : ZETA ORDERING ON (zeta contribution) ====="
+python muonBDT.py --n-events 0 --d0-mode both --neighbor-dr-cut 0.5 --neighbor-dz-cut 10 \
+  --max-neighbors 10 --use-zeta-order true --use-gbreweighter true "${HP[@]}"
+
+echo "done"

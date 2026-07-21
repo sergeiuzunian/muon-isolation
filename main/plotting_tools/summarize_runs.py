@@ -141,7 +141,7 @@ def plot_bdt_cone_heatmap(bdt, d0_mode, suffix, phrase):
     im = ax.imshow(M, cmap="viridis", aspect="auto", origin="lower")
     ax.set_xticks(range(len(dzs))); ax.set_xticklabels([f"{d:g}" for d in dzs])
     ax.set_yticks(range(len(drs))); ax.set_yticklabels([f"{d:g}" for d in drs])
-    ax.set_xlabel("Neighbor dz Cut [mm]"); ax.set_ylabel("Cone ΔR")
+    ax.set_xlabel(r"Neighbor $|\Delta z_0\sin\theta|$ Cut [mm]"); ax.set_ylabel("Cone ΔR")
     ax.set_title(f"BDT Best Holdout AUC Over Cone (K=10, Reweight On)\n{phrase}")
     for i in range(len(drs)):
         for j in range(len(dzs)):
@@ -168,7 +168,7 @@ def plot_d0_vs_dr(bdt):
     if not drawn:
         plt.close(fig); return
     ax.set_xlabel("Cone ΔR"); ax.set_ylabel("Holdout AUC")
-    ax.set_title("BDT Holdout AUC vs Cone ΔR by d0 Mode (Best dz, Reweight On)")
+    ax.set_title(r"BDT Holdout AUC vs Cone ΔR by d0 Mode (Best $|\Delta z_0\sin\theta|$, Reweight On)")
     ax.grid(alpha=0.3); ax.legend(title="d0 Mode", loc="lower right")
     fig.tight_layout(); fig.savefig(os.path.join(TABLES, "bdt_d0_vs_dr.png"), dpi=140); plt.close(fig)
     print("  saved bdt_d0_vs_dr.png")
@@ -193,7 +193,7 @@ def plot_bdt_cone_heatmap_dr5(bdt):
     ax.set_xticks(range(len(modes))); ax.set_xticklabels([short[m] for m in modes])
     ax.set_yticks(range(len(drs))); ax.set_yticklabels([f"{d:g}" for d in drs])
     ax.set_xlabel("d0 Mode"); ax.set_ylabel("Cone ΔR")
-    ax.set_title("BDT Holdout AUC vs Cone ΔR to 5.0 by d0 Mode\n(dz < 15 mm, Reweight On)")
+    ax.set_title("BDT Holdout AUC vs Cone ΔR to 5.0 by d0 Mode\n($|\\Delta z_0\\sin\\theta| < 15$ mm, Reweight On)")
     hi = np.nanmax(M)
     for i in range(len(drs)):
         for j in range(len(modes)):
@@ -221,7 +221,7 @@ def _render_capture(sub, K, dz, out_name):
     for a in ax:
         a.axvline(0.5, color="gray", ls="--", lw=1, alpha=0.7, label="Physical Cone Limit (ΔR = 0.5)")
         a.set_xlabel("Cone ΔR"); a.grid(alpha=0.3); a.legend(fontsize=9, loc="lower right")
-    fig.suptitle(f"BDT Neighbor Capture (K = {K}, dz < {dz:g} mm)", fontsize=13, weight="bold")
+    fig.suptitle(rf"BDT Neighbor Capture (K = {K}, $|\Delta z_0\sin\theta| < {dz:g}$ mm)", fontsize=13, weight="bold")
     fig.tight_layout()
     fig.savefig(os.path.join(TABLES, out_name), dpi=140); plt.close(fig)
     print(f"  saved {out_name}")
@@ -252,7 +252,7 @@ def plot_bdt_depth(bdt, d0_mode, suffix, phrase):
     fig, ax = plt.subplots(figsize=(8, 6))
     for (dr, dz), sub in g.groupby(["dR", "dz"]):
         best = sub.groupby("depth")["auc_holdout"].max().sort_index()
-        ax.plot(best.index.values, best.values, "o-", lw=2, label=f"ΔR < {dr:g}, dz < {dz:g} mm")
+        ax.plot(best.index.values, best.values, "o-", lw=2, label=rf"ΔR < {dr:g}, $|\Delta z_0\sin\theta| < {dz:g}$ mm")
     ax.set_xlabel("Max Tree Depth"); ax.set_ylabel("Holdout AUC")
     ax.set_title(f"BDT Holdout AUC vs Tree Depth\n{phrase}")
     ax.grid(alpha=0.3); ax.legend(fontsize=9, title="Cone", loc="lower left")
@@ -275,12 +275,14 @@ def plot_iso_heatmap(iso):
     im = ax.imshow(M, cmap="magma", aspect="auto", origin="lower")
     ax.set_xticks(range(len(dzs))); ax.set_xticklabels([str(d) for d in dzs])
     ax.set_yticks(range(len(drs))); ax.set_yticklabels([f"{d:g}" for d in drs])
-    ax.set_xlabel("dz Cut"); ax.set_ylabel("Isolation Cone ΔR")
+    ax.set_xlabel(r"$|\Delta z_0\sin\theta|$ Cut"); ax.set_ylabel("Isolation Cone ΔR")
     ax.set_title("Isolation-Cut AUC Over Cone")
+    hi = np.nanmax(M)
     for i in range(len(drs)):
         for j in range(len(dzs)):
             if not np.isnan(M[i, j]):
-                ax.text(j, i, f"{M[i,j]:.4f}", ha="center", va="center", color="white", fontsize=9)
+                ax.text(j, i, f"{M[i,j]:.4f}", ha="center", va="center",
+                        color="white" if M[i, j] < hi - 0.05 else "black", fontsize=9)
     fig.colorbar(im, ax=ax, label="Isolation AUC"); fig.tight_layout()
     fig.savefig(os.path.join(TABLES, "iso_cone_heatmap.png"), dpi=140); plt.close(fig)
     print("  saved iso_cone_heatmap.png")

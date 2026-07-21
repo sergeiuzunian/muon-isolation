@@ -349,10 +349,12 @@ def plot_roc(y_train, proba_train, y_hold, proba_hold, plot_dir, settings_str):
     auc_tr = float(auc(fpr_tr, tpr_tr)); k_tr = int(np.argmax(tpr_tr - fpr_tr))
     fpr_ho, tpr_ho, th_ho = roc_curve(y_hold, proba_hold)
     auc_ho = float(auc(fpr_ho, tpr_ho)); k_ho = int(np.argmax(tpr_ho - fpr_ho))
+
     fig, ax = plt.subplots(figsize=(8, 7))
     ax.plot(fpr_tr, tpr_tr, color="steelblue", lw=2, label=f"Train ROC (AUC = {auc_tr:.4f})")
     ax.plot(fpr_ho, tpr_ho, color="darkorange", lw=2, label=f"Holdout ROC (AUC = {auc_ho:.4f})")
     ax.plot([0, 1], [0, 1], "--", color="gray", lw=1, label="Random")
+    
     ax.scatter([fpr_tr[k_tr]], [tpr_tr[k_tr]], color="steelblue", s=120, marker="o", edgecolors="black",
                zorder=5, label=f"Train Youden J (Score > {th_tr[k_tr]:.3f}, J = {tpr_tr[k_tr]-fpr_tr[k_tr]:.3f})")
     ax.scatter([fpr_ho[k_ho]], [tpr_ho[k_ho]], color="darkorange", s=160, marker="*", edgecolors="black",
