@@ -11,20 +11,20 @@ At the physical cone dR <= 0.5 the BDT and NN reach holdout AUC of 0.8822 and 0.
 ## Repository Contents
 
 main/ contains: 
-- muon_iso_BDT (xgboost classifier script), 
-- muon_iso_NN (pyTorch classifier script),
-- muon_iso_cut (cut based isolation script),
-- plotting_tools (scripts that read run outputs).
+- muon_iso_BDT/ (xgboost classifier script), 
+- muon_iso_NN/ (pyTorch classifier script),
+- muon_iso_cut/ (cut based isolation script),
+- plotting_tools/ (scripts that read run outputs).
 
 The classifier scripts, the isolation scripts, and the ROC overlay and rejection table plotting tools have batch wrapper pbs files next to them.
 
 Every run writes a settings-named directory under output/; summarize_runs.py collects them into dated summary_tables folders.
 
 notebooks/ contains:
-- original NIU ATLAS group introductory information Jupyter Notebook (prior to machine learning work).
+- Original NIU ATLAS group introductory information Jupyter Notebook (prior to machine learning work).
 
 output/ contains:
-- past outputs of BDT and Neural Network models and plotting tools (ROC plots, loss plots, feature importances, csv summaries, etc.).
+- Past outputs of BDT and Neural Network models and plotting tools (ROC plots, loss plots, feature importances, csv summaries, etc.).
 
 presentations/ contains:
 - Slides from CERN Isolation and Fakes Forum presentation, given July 27, 2026,
