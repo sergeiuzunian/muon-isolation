@@ -1,23 +1,39 @@
 #!/usr/bin/env python3
 
+#isoPLOT.py - Isolation-Cut Baseline for Prompt vs Non-Prompt Muons
+#no training; the classifier is a cut on relative track isolation, roc curve and auc come from that
+
+#modules for command line argument parsing and file handling
 import argparse
 import os
 import csv
+
+#modules for vectorized numerical operations, particle physics data handling, and plotting
 import numpy as np
 import uproot
 import awkward as ak
 import matplotlib.pyplot as plt
+
+#module for progress bar in terminal output
 from tqdm import tqdm
+
+#roc curve and auc for the isolation cut
 from sklearn.metrics import roc_auc_score, roc_curve, auc
 
+#paths for signal and background samples; can be overridden with --signal-path and --bkg-path
 SIG_DEFAULT = "/lstr/sahara/niueftracking/kesedlac/muon_isolation/OUTPUT/run_InvPtPU200/"
 BKG_DEFAULT = "/lstr/sahara/niueftracking/kesedlac/muon_isolation/OUTPUT/run_bjet/"
+
+#module constants for labeling signal and background in plots
 SIG_LABEL = "Prompt Muon (Signal)"
 BKG_LABEL = "Non-Prompt Muon (Background)"
 
+#isoPLOT.py version for keeping track of run data relative to script edits
 VERSION = "1.0"
 
 
+#function to look up the |z0sinTheta| window in mm for each muon from the (pT, |eta|) table
+#this is the auto dz cut; rows are pT bins from 1.3 to 30 GeV, columns are |eta| < 1, 1 to 2, > 2
 def get_auto_dz_cut_vectorized(pts_gev, etas):
     abs_etas = np.abs(etas)
     eta_bins = np.zeros_like(abs_etas, dtype=int)
@@ -34,6 +50,7 @@ def get_auto_dz_cut_vectorized(pts_gev, etas):
     return cuts_table[pt_bins, eta_bins]
 
 
+#function to compute deltaR between muons and other tracks; copied from muonBDT.py
 def compute_deltaR_rect(eta_mu, phi_mu, eta, phi):
     d_eta = eta_mu[:, None] - eta[None, :]
     d_phi = np.arctan2(np.sin(phi_mu[:, None] - phi[None, :]),
@@ -41,6 +58,7 @@ def compute_deltaR_rect(eta_mu, phi_mu, eta, phi):
     return np.sqrt(d_eta ** 2 + d_phi ** 2)
 
 
+#function to parse command line arguments for sample paths, event count, pT floor, and cone definition
 def parse_args():
     p = argparse.ArgumentParser(description="isolation-cut baseline for prompt vs non-prompt muons")
     p.add_argument("--signal-path", type=str, default=SIG_DEFAULT)
@@ -53,6 +71,7 @@ def parse_args():
     return p.parse_args()
 
 
+#function to load track branches from a sample's root file into a dataframe; n_events <= 0 loads all
 def load_sample(path, n_events):
     f = uproot.open(path + "OutputIsolation.root:OutputIsolation")
     stop = None if n_events <= 0 else n_events
@@ -61,6 +80,8 @@ def load_sample(path, n_events):
     return ak.to_dataframe(a)
 
 
+#function to compute relative track isolation (cone pT sum / muon pT) for each candidate muon
+#signal keeps only single-muon events; returns the isolation values and the number of events used
 def muon_isolations(df, min_pt, dr_cut, dz_mode, dz_val, require_single_muon):
     out = []
     n_ev = 0
@@ -77,6 +98,7 @@ def muon_isolations(df, min_pt, dr_cut, dz_mode, dz_val, require_single_muon):
         if cand.size == 0:
             continue
         eta_mu, phi_mu, pt_mu = eta[cand], phi[cand], pt[cand]
+        #cone mask (muons x tracks); dR > 0 drops the muon's own track, dz cut per muon when requested
         dR = compute_deltaR_rect(eta_mu, phi_mu, eta, phi)
         in_cone = (dR > 0) & (dR < dr_cut) & usable[None, :]
         if dz_mode != "none":
@@ -89,10 +111,13 @@ def muon_isolations(df, min_pt, dr_cut, dz_mode, dz_val, require_single_muon):
     return (np.concatenate(out) if out else np.empty(0)), n_ev
 
 
+#main function
+#isolation for both samples, then roc curve, isolation distributions, and summary.csv
 def main():
     args = parse_args()
     ev_tag = "MAX" if args.n_events <= 0 else str(args.n_events)
 
+    #dz cut mode from the --iso-dz-cut string: none, auto table, or a fixed value in mm
     dzs = args.iso_dz_cut.strip().lower()
     if dzs in ("none", "off"):
         dz_mode, dz_val, dz_tag = "none", 0.0, "none"
@@ -114,12 +139,14 @@ def main():
     print(f"signal muons: {len(iso_sig):,} ({n_sig_ev:,} events) | "
           f"background muons: {len(iso_bkg):,} ({n_bkg_ev:,} events)")
 
+    #lower isolation is more prompt-like, so the classifier score is minus the isolation
     iso = np.concatenate([iso_sig, iso_bkg])
     y = np.concatenate([np.ones(len(iso_sig), int), np.zeros(len(iso_bkg), int)])
     score = -iso
     auc_iso = float(roc_auc_score(y, score))
     print(f"\nisolation-cut AUC: {auc_iso:.4f}")
 
+    #run settings text for the plot settings boxes
     if dz_mode == "auto":
         cone = f"dR < {args.iso_dr_cut} and |z0sinθ_track - z0sinθ_muon| < auto(pT,|eta|) table"
     elif dz_mode == "fixed":
@@ -143,10 +170,12 @@ def main():
     os.makedirs(o)
     print(f"output dir: {o}")
 
+    #function to stamp the run settings box at the bottom of plots
     def settings_box(fig):
         fig.text(0.01, -0.03, settings, ha="left", va="top", fontsize=8, family="monospace",
                  bbox=dict(boxstyle="round,pad=0.6", facecolor="whitesmoke", edgecolor="gray"))
 
+    #roc curve with the Youden J operating point; iso_thr is the isolation cut at max TPR-FPR
     fpr, tpr, thr = roc_curve(y, score)
     a = float(auc(fpr, tpr))
     k = int(np.argmax(tpr - fpr))
@@ -158,11 +187,12 @@ def main():
                label=f"Youden J (iso < {iso_thr:.3f}, J = {tpr[k]-fpr[k]:.3f})")
     ax.set_xlabel("False Positive Rate (non-prompt muons misidentified as prompt)", fontsize=11)
     ax.set_ylabel("True Positive Rate (prompt muons correctly identified)", fontsize=11)
-    ax.set_title("Prompt vs Non-Prompt Muon — Isolation-Cut ROC", fontsize=12)
+    ax.set_title("Prompt vs Non-Prompt Muon - Isolation-Cut ROC", fontsize=12)
     ax.legend(loc="lower right", fontsize=9); ax.grid(alpha=0.3)
     plt.tight_layout(); settings_box(fig)
     plt.savefig(os.path.join(o, "roc.png"), dpi=150, bbox_inches="tight"); plt.close()
 
+    #isolation distributions for signal and background, clipped at the 99th percentile
     hi = float(np.quantile(iso, 0.99))
     bins = np.linspace(0, max(hi, 0.1), 60)
     fig, ax = plt.subplots(figsize=(11, 6))
@@ -172,11 +202,12 @@ def main():
             color="gold", label=BKG_LABEL)
     ax.set_xlabel("Relative Track Isolation  (Σ pT in cone / pT muon)", fontsize=12)
     ax.set_ylabel("Normalized Counts", fontsize=12)
-    ax.set_title(f"Muon Isolation — Prompt vs Non-Prompt\nisolation-cut AUC = {auc_iso:.4f}", fontsize=11)
+    ax.set_title(f"Muon Isolation - Prompt vs Non-Prompt\nisolation-cut AUC = {auc_iso:.4f}", fontsize=11)
     ax.legend(fontsize=11); ax.grid(alpha=0.3)
     plt.tight_layout(); settings_box(fig)
     plt.savefig(os.path.join(o, "isolation_distribution.png"), dpi=150, bbox_inches="tight"); plt.close()
 
+    #write settings and results to summary.csv (used by summarize_runs.py)
     with open(os.path.join(o, "summary.csv"), "w", newline="") as fh:
         cw = csv.writer(fh); cw.writerow(["key", "value"])
         for k2, v2 in [("isoplot_version", VERSION),
@@ -189,5 +220,6 @@ def main():
     print("saved roc.png, isolation_distribution.png, summary.csv\ndone")
 
 
+#run main() only when executed as a script, not when imported
 if __name__ == "__main__":
     main()

@@ -7,7 +7,7 @@
 #PBS -e /home/suzunyan/projects/muonisolation/job_logs/
 #PBS -m ae
 
-#iso_bdt_roc.py - overlay best isolation ROC and best physical BDT holdout ROC on one plot
+#iso_bdt_roc.py - overlays best isolation ROC and best physical BDT holdout ROC on one plot
 
 cd "$PBS_O_WORKDIR"
 source /home/suzunyan/.venv/bin/activate

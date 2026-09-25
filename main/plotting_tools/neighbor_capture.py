@@ -1,20 +1,28 @@
 #!/usr/bin/env python3
 
+#neighbor_capture.py - Captured Neighbor Slots vs Cone dR
+#counts cone tracks per muon for a grid of dR cuts and K values and writes a csv; summarize_runs.py plots it
+
+#modules for command line argument parsing, file handling, and numerical operations
 import argparse
 import os
 import sys
 import csv
 import numpy as np
+
+#module for progress bar in terminal output
 from tqdm import tqdm
 
-#muonBDT.py lives in the sibling muon_iso_BDT folder
-#add it to the module search path before importing
+#muonBDT.py is imported from its directory for the sample paths, loader, and deltaR
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "muon_iso_BDT"))
 from muonBDT import load_sample, compute_deltaR_rect, SIG_DEFAULT, BKG_DEFAULT
 
+#cone dR grid to scan
 DR_GRID = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.5, 2.0, 3.0, 5.0]
 
 
+#function to count cone tracks per candidate muon (same dz cut and pT floor as muonBDT.py)
+#returns per (dR, K) the mean number of filled slots and the fraction of muons with all K slots filled
 def capture_stats(df, drs, min_pt, dz_cut, Ks, require_single_muon):
     Ka = np.asarray(Ks)
     sums = np.zeros((len(drs), len(Ka)))
@@ -43,6 +51,8 @@ def capture_stats(df, drs, min_pt, dz_cut, Ks, require_single_muon):
     return sums / max(n_mu, 1), sat / max(n_mu, 1), n_mu
 
 
+#main function
+#count for both samples and write neighbor_capture.csv
 def main():
     p = argparse.ArgumentParser(description="captured neighbor slots vs cone dR, for one or more K")
     p.add_argument("--signal-path", type=str, default=SIG_DEFAULT)
@@ -81,5 +91,6 @@ def main():
     print(f"saved {out}\ndone")
 
 
+#run main() only when executed as a script, not when imported
 if __name__ == "__main__":
     main()

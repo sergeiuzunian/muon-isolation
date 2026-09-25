@@ -7,6 +7,7 @@
 #PBS -e /home/suzunyan/projects/muonisolation/job_logs/
 #PBS -m ae
 
+#isoPLOT.py cone scan: dR 0.2 to 0.5 with no dz cut, the auto table, and fixed 10 to 30 mm
 
 cd "$PBS_O_WORKDIR"
 source /home/suzunyan/.venv/bin/activate

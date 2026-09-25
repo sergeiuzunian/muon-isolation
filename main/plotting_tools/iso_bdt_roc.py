@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+#iso_bdt_roc.py - Overlay of the Best Isolation-Cut ROC and the Best Physical-Cone BDT Holdout ROC
+#rebuilds the BDT holdout split with the run's settings and scores it with the saved model; isolation is recomputed from the samples
+
+#modules for file handling, model loading, numerical operations, roc curves, and plotting (Agg backend, no display on the batch nodes)
 import os
 import sys
 import pickle
@@ -9,6 +13,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc
 
+#muonBDT.py and isoPLOT.py are imported from their directories for the loaders, feature builder, split, and isolation
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAIN = os.path.dirname(HERE)
 ROOT = os.path.dirname(MAIN)
@@ -17,11 +22,13 @@ sys.path.insert(0, os.path.join(MAIN, "muon_iso_cut"))
 import muonBDT
 import isoPLOT
 
+#saved model of the best physical-cone BDT run (dR0.5, dz10, d0 both, K10, depth 3) and the output directory
 BDT_MODEL = os.path.join(ROOT, "output",
                          "muonbdt_scan_dr0.5_dz10.0_K10_d0on_iso_rw_v1.0_nMAX_run1",
                          "cfg01_d3_n200_lr0.1_L1.0_mcw1.0", "model.pkl")
 OUT = os.path.join(ROOT, "output", "iso_bdt_roc_overlay")
 
+#settings matching that run; ISO_BDT_ROC_N in the environment overrides the event count for a quick test
 NEVENTS = int(os.environ.get("ISO_BDT_ROC_N", "0"))
 MIN_PT = 1000.0
 BDT_DR = 0.5
@@ -32,6 +39,7 @@ SEED = 42
 HOLD = 0.2
 
 
+#function to rebuild the BDT holdout muons with the same split seed and score them with the saved model
 def bdt_holdout_roc():
     df = muonBDT.load_sample(muonBDT.SIG_DEFAULT, NEVENTS)
     Xs, ys, es = muonBDT.build_muon_matrix(df, MIN_PT, BDT_DR, BDT_DZ, K,
@@ -52,6 +60,7 @@ def bdt_holdout_roc():
     return fpr, tpr, float(auc(fpr, tpr))
 
 
+#function to compute the isolation-cut roc on the full samples (no training, so no holdout)
 def iso_full_roc():
     df = isoPLOT.load_sample(isoPLOT.SIG_DEFAULT, NEVENTS)
     iso_s, _ = isoPLOT.muon_isolations(df, MIN_PT, ISO_DR, "auto", 0.0, True)
@@ -65,6 +74,8 @@ def iso_full_roc():
     return fpr, tpr, float(auc(fpr, tpr))
 
 
+#main function
+#both roc curves on one plot
 def main():
     print("building BDT holdout ROC (dR0.5, dz10, d0 both, K10)...")
     fb, tb, ab = bdt_holdout_roc()
@@ -89,5 +100,6 @@ def main():
     print("saved " + path)
 
 
+#run main() only when executed as a script, not when imported
 if __name__ == "__main__":
     main()

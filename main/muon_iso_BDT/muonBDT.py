@@ -361,7 +361,7 @@ def plot_roc(y_train, proba_train, y_hold, proba_hold, plot_dir, settings_str):
                zorder=5, label=f"Holdout Youden J (Score > {th_ho[k_ho]:.3f}, J = {tpr_ho[k_ho]-fpr_ho[k_ho]:.3f})")
     ax.set_xlabel("False Positive Rate (Non-Prompt Muons Misidentified as Prompt)", fontsize=11)
     ax.set_ylabel("True Positive Rate (Prompt Muons Correctly Identified)", fontsize=11)
-    ax.set_title("Prompt vs Non-Prompt Muon Classifier — ROC", fontsize=12)
+    ax.set_title("Prompt vs Non-Prompt Muon Classifier - ROC", fontsize=12)
     ax.legend(loc="lower right", fontsize=9); ax.grid(alpha=0.3)
     plt.tight_layout(); add_settings_box(fig, settings_str)
     out = os.path.join(plot_dir, "roc.png")
@@ -381,7 +381,7 @@ def plot_feature_importances(model, names, n_events, label, plot_dir, settings_s
     ax.barh(range(len(disp)), imps, color="steelblue", edgecolor="black")
     ax.set_yticks(range(len(disp))); ax.set_yticklabels(disp, fontsize=10)
     ax.set_xlabel("Feature Importance (gain, neighbor groups summed)", fontsize=12)
-    ax.set_title(f"Feature Importances — Prompt vs Non-Prompt Muon BDT\n{label}", fontsize=11)
+    ax.set_title(f"Feature Importances - Prompt vs Non-Prompt Muon BDT\n{label}", fontsize=11)
     ax.invert_yaxis(); ax.grid(alpha=0.3, axis="x"); plt.tight_layout()
     nbh_rows = [(n, g) for n, g, _ in per_slot_rows if g is not None]
     key_text = None
@@ -415,7 +415,7 @@ def plot_score_distribution(y_test, proba, n_events, label, plot_dir, settings_s
     ax.hist(proba[y_test == 0], bins=bins, alpha=0.6, color="gold", label=BKG_LABEL,
             density=True, histtype="stepfilled")
     ax.set_xlabel("BDT Score (prompt probability)", fontsize=12); ax.set_ylabel("Normalized Counts", fontsize=12)
-    ax.set_title(f"Holdout BDT Score — Prompt vs Non-Prompt Muons\n{label}", fontsize=11)
+    ax.set_title(f"Holdout BDT Score - Prompt vs Non-Prompt Muons\n{label}", fontsize=11)
     ax.legend(fontsize=11); ax.grid(alpha=0.3); plt.tight_layout(); add_settings_box(fig, settings_str)
     out = os.path.join(plot_dir, f"score_distribution_Ev{n_events}.png")
     plt.savefig(out, dpi=150, bbox_inches="tight"); plt.close(); print(f"saved {out}")
@@ -439,7 +439,7 @@ def plot_pt_eta_reweighted(pt_tr, eta_tr, y_tr, w, plot_dir, settings_str):
             ax[j].hist(vals[bkg], bins=bins, density=True, alpha=0.6, label=BKG_LABEL, color="gold",
                        weights=None if wt is None else wt[bkg])
             if logx: ax[j].set_xscale("log")
-            ax[j].set_title(f"Muon {xlabel} — {title}"); ax[j].set_xlabel(xlabel); ax[j].set_ylabel("Density")
+            ax[j].set_title(f"Muon {xlabel} - {title}"); ax[j].set_xlabel(xlabel); ax[j].set_ylabel("Density")
             ax[j].legend(); ax[j].grid(alpha=0.3)
         fig.suptitle("GBReweighter Check: Background Reweighted to Match Signal in (pT, eta)", fontsize=12)
         plt.tight_layout(); add_settings_box(fig, settings_str)
@@ -485,7 +485,7 @@ def plot_all_feature_distributions(X_train, y_train, w, names, plot_dir, n_event
                 ax[j].hist(sig_v, bins=bins, density=True, alpha=0.6, label=SIG_LABEL, color="blue", weights=sw)
                 ax[j].hist(bkg_v, bins=bins, density=True, alpha=0.6, label=BKG_LABEL, color="gold", weights=bw)
                 if logx: ax[j].set_xscale("log")
-                ax[j].set_title(f"{prefix} — {title}"); ax[j].set_xlabel(xlabel or prefix); ax[j].set_ylabel("Density")
+                ax[j].set_title(f"{prefix} - {title}"); ax[j].set_xlabel(xlabel or prefix); ax[j].set_ylabel("Density")
                 ax[j].legend(); ax[j].grid(alpha=0.3)
             fig.suptitle(prefix, fontsize=12)
         else:

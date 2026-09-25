@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+#muonNN.py - Prompt vs Non-Prompt Muon NN Classifier
+#pytorch MLP on the same feature matrix as muonBDT.py, zero-padded and standardized instead of NaN-padded
+
 #modules for command line argument parsing and file handling
 import argparse
 import os
@@ -19,7 +22,7 @@ import torch.nn as nn
 
 #modules for the event split and roc curves
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_curve, auc
+from sklearn.metrics import roc_curve, auc, roc_auc_score
 
 #modules for particle physics data handling and background muon (pT, eta) reweighting
 import uproot
@@ -204,6 +207,8 @@ def parse_args():
     p.add_argument("--epochs", type=int, default=20)
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--learning-rate", type=float, default=0.001)
+    p.add_argument("--hidden1", type=int, default=20, help="first hidden layer width")
+    p.add_argument("--hidden2", type=int, default=20, help="second hidden layer width")
 
     #choose if the GBReweighter should be used to reweight background (pT, eta) to match signal
     p.add_argument("--use-gbreweighter", type=str, default="true", choices=["true", "false"])
@@ -217,14 +222,13 @@ def parse_args():
     return p.parse_args()
 
 
-#network architecture
-#105 inputs -> 20 -> 20 -> 1 output 
+#network architecture: n_in inputs -> h1 -> h2 -> 1 output; hidden widths set from the command line
 class MLP(nn.Module):
-    def __init__(self, n_in):
+    def __init__(self, n_in, h1, h2):
         super().__init__()
-        self.net = nn.Sequential(nn.Linear(n_in, 20), nn.ReLU(),
-                                 nn.Linear(20, 20), nn.ReLU(),
-                                 nn.Linear(20, 1))
+        self.net = nn.Sequential(nn.Linear(n_in, h1), nn.ReLU(),
+                                 nn.Linear(h1, h2), nn.ReLU(),
+                                 nn.Linear(h2, 1))
 
     def forward(self, x):
         return self.net(x).squeeze(-1)
@@ -244,6 +248,25 @@ def plot_loss_vs_epoch(train_losses, hold_losses, out_dir, settings_str):
     plt.savefig(os.path.join(out_dir, "loss_vs_epoch.png"), dpi=150, bbox_inches="tight"); plt.close()
 
 
+#function to plot holdout auc versus epoch with the best epoch marked
+def plot_auc_vs_epoch(hold_aucs, out_dir, settings_str):
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ep = range(1, len(hold_aucs) + 1)
+    best = int(np.argmax(hold_aucs))
+    ax.plot(ep, hold_aucs, "o-", color="darkorange", lw=2, label="Holdout AUC")
+    ax.scatter([best + 1], [hold_aucs[best]], color="darkorange", s=160, marker="*",
+               edgecolors="black", zorder=5,
+               label=f"Best (AUC = {hold_aucs[best]:.4f}, epoch {best + 1})")
+    ax.set_xlabel("Epoch", fontsize=12)
+    ax.set_ylabel("Holdout AUC", fontsize=12)
+    ax.set_title("Holdout AUC vs Epoch", fontsize=12)
+    ax.legend(fontsize=10, loc="lower right"); ax.grid(alpha=0.3)
+    plt.tight_layout(); add_settings_box(fig, settings_str)
+    plt.savefig(os.path.join(out_dir, "auc_vs_epoch.png"), dpi=150, bbox_inches="tight"); plt.close()
+
+
+#main function
+#load and build both samples, split by event, reweight, standardize, then train the network and plot
 def main():
     args = parse_args()
     torch.manual_seed(args.random_state)
@@ -305,7 +328,7 @@ def main():
     X_train = (X_train - mu) / sd
     X_hold = (X_hold - mu) / sd
 
-    model = MLP(X_train.shape[1])
+    model = MLP(X_train.shape[1], args.hidden1, args.hidden2)
     n_params = sum(p.numel() for p in model.parameters())
 
     #run settings text for the plot settings boxes; _row pads labels so the box lines up as a table
@@ -325,7 +348,7 @@ def main():
                            f"|Δz0sinθ|<{args.neighbor_dz_cut}mm (signed vertex sep); "
                            f"dR-asc, pT-desc" + (", ζ-asc" if use_zeta else "") + "; zero-padded")
                           if use_neighbors else "off"),
-        _row("Network", f"MLP {X_train.shape[1]}->20->20->1, ReLU, {n_params} parameters"),
+        _row("Network", f"MLP {X_train.shape[1]}->{args.hidden1}->{args.hidden2}->1, ReLU, {n_params} parameters"),
         _row("Training", f"Adam lr={args.learning_rate}, batch={args.batch_size}, epochs={args.epochs}; "
                          f"inputs standardized with training statistics"),
         _row("Reweighting", "GBReweighter (pT,eta) bkg->signal, train only" if use_gbrw else "off"),
@@ -357,6 +380,7 @@ def main():
 
     train_losses = []
     hold_losses = []
+    hold_aucs = []
     model.train()
     for epoch in range(args.epochs):
         total = 0.0
@@ -367,19 +391,28 @@ def main():
             opt.step()
             total += float(loss) * len(yb_)
         train_losses.append(total / len(ds))
+        #per-epoch holdout loss and holdout auc from the same forward pass
         model.eval()
         with torch.no_grad():
-            hold_losses.append(float((lossf(model(Xh_t), yh_t) * wh_t).mean()))
+            hlogits = model(Xh_t)
+            hold_losses.append(float((lossf(hlogits, yh_t) * wh_t).mean()))
+            hold_aucs.append(float(roc_auc_score(y_hold, torch.sigmoid(hlogits).numpy())))
         model.train()
-        print(f"epoch {epoch+1}/{args.epochs}  loss {train_losses[-1]:.4f} | holdout loss {hold_losses[-1]:.4f}")
+        print(f"epoch {epoch+1}/{args.epochs}  loss {train_losses[-1]:.4f} | "
+              f"holdout loss {hold_losses[-1]:.4f} | holdout auc {hold_aucs[-1]:.4f}")
+
+    #epoch with the best holdout auc
+    best_ep = int(np.argmax(hold_aucs)) + 1
+    auc_ho_best = float(hold_aucs[best_ep - 1])
+    print(f"best holdout auc {auc_ho_best:.4f} at epoch {best_ep}/{args.epochs}")
 
     #evaluate scores for train and holdout, roc curves and auc
     model.eval()
     with torch.no_grad():
         proba_train = torch.sigmoid(model(torch.from_numpy(X_train))).numpy()
         proba_hold = torch.sigmoid(model(torch.from_numpy(X_hold))).numpy()
-    fpr_tr, tpr_tr, _ = roc_curve(y_train, proba_train)
-    fpr_ho, tpr_ho, _ = roc_curve(y_hold, proba_hold)
+    fpr_tr, tpr_tr, th_tr = roc_curve(y_train, proba_train)
+    fpr_ho, tpr_ho, th_ho = roc_curve(y_hold, proba_hold)
     auc_tr = float(auc(fpr_tr, tpr_tr))
     auc_ho = float(auc(fpr_ho, tpr_ho))
     print(f"auc train {auc_tr:.4f} | holdout {auc_ho:.4f} | gap {auc_tr-auc_ho:.4f}")
@@ -393,7 +426,7 @@ def main():
     nbr_str += "_iso" if use_isolation else "_noiso"
     nbr_str += "_zeta" if use_zeta else ""
     nbr_str += "_rw" if use_gbrw else "_norw"
-    base = os.path.join(output_dir, f"muonnn_{nbr_str}_v{VERSION}_n{ev_tag}")
+    base = os.path.join(output_dir, f"muonnn_{nbr_str}_h{args.hidden1}x{args.hidden2}_v{VERSION}_n{ev_tag}")
     out = base; i = 0
     while os.path.exists(out):
         i += 1; out = f"{base}_run{i}"
@@ -406,15 +439,23 @@ def main():
     ax.plot(fpr_tr, tpr_tr, color="steelblue", lw=2, label=f"Train ROC (AUC = {auc_tr:.4f})")
     ax.plot(fpr_ho, tpr_ho, color="darkorange", lw=2, label=f"Holdout ROC (AUC = {auc_ho:.4f})")
     ax.plot([0, 1], [0, 1], "--", color="gray", lw=1, label="Random")
+
+    #youden j operating points, same convention as muonBDT.py
+    k_tr = int(np.argmax(tpr_tr - fpr_tr)); k_ho = int(np.argmax(tpr_ho - fpr_ho))
+    ax.scatter([fpr_tr[k_tr]], [tpr_tr[k_tr]], color="steelblue", s=120, marker="o", edgecolors="black",
+               zorder=5, label=f"Train Youden J (Score > {th_tr[k_tr]:.3f}, J = {tpr_tr[k_tr]-fpr_tr[k_tr]:.3f})")
+    ax.scatter([fpr_ho[k_ho]], [tpr_ho[k_ho]], color="darkorange", s=160, marker="*", edgecolors="black",
+               zorder=5, label=f"Holdout Youden J (Score > {th_ho[k_ho]:.3f}, J = {tpr_ho[k_ho]-fpr_ho[k_ho]:.3f})")
     ax.set_xlabel("False Positive Rate (Non-Prompt Muons Misidentified as Prompt)", fontsize=11)
     ax.set_ylabel("True Positive Rate (Prompt Muons Correctly Identified)", fontsize=11)
-    ax.set_title("Prompt vs Non-Prompt Muon NN Classifier — ROC", fontsize=12)
+    ax.set_title("Prompt vs Non-Prompt Muon NN Classifier - ROC", fontsize=12)
     ax.legend(loc="lower right", fontsize=9); ax.grid(alpha=0.3)
     plt.tight_layout(); add_settings_box(fig, settings_data)
     plt.savefig(os.path.join(out, "roc.png"), dpi=150, bbox_inches="tight"); plt.close()
 
-    #loss vs epoch plot
+    #loss and auc vs epoch plots
     plot_loss_vs_epoch(train_losses, hold_losses, out, settings_data)
+    plot_auc_vs_epoch(hold_aucs, out, settings_data)
 
     #saves the trained network and a summary of settings and results
     torch.save(model.state_dict(), os.path.join(out, "model.pt"))
@@ -428,15 +469,18 @@ def main():
                      ("d0_mode", d0_mode), ("use_muon_d0", use_muon_d0), ("use_nbr_d0", use_nbr_d0),
                      ("use_isolation", use_isolation), ("use_gbreweighter", use_gbrw),
                      ("n_features", X_train.shape[1]),
+                     ("hidden1", args.hidden1), ("hidden2", args.hidden2), ("n_params", n_params),
                      ("n_signal_events", n_sig_ev), ("n_bkg_events", n_bkg_ev),
                      ("n_signal_muons", len(ys)), ("n_bkg_muons", len(yb)),
                      ("n_train", len(y_train)), ("n_holdout", len(y_hold)), ("scale_pos_weight", spw),
                      ("epochs", args.epochs), ("batch_size", args.batch_size),
                      ("learning_rate", args.learning_rate),
-                     ("auc_train", auc_tr), ("auc_holdout", auc_ho)]:
+                     ("auc_train", auc_tr), ("auc_holdout", auc_ho),
+                     ("best_epoch", best_ep), ("auc_holdout_best", auc_ho_best)]:
             w.writerow([k, v])
     print("done")
 
 
+#run main() only when executed as a script, not when imported
 if __name__ == "__main__":
     main()

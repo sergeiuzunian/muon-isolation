@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+#summarize_runs.py - Collect All nMAX Runs Into Tables and Summary Plots
+#reads every summary.csv under output/ and writes a dated summary_tables folder with run tables, cone heatmaps, depth plots, and copies of the best plots
+
+#modules for file handling, csv reading, file copying, numerical operations, dataframes, plotting, and the date stamp
 import os
 import csv
 import glob
@@ -9,11 +13,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
 
-#project root is three levels up from this file (muonisolation/main/plotting_tools/)
+#project root is three levels up from this file (muonisolation/main/plotting_tools/); TABLES is a new dated folder under output/
 OUTPUT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "output")
 TABLES = os.path.join(OUTPUT, f"summary_tables_{datetime.now():%d.%m.%y}")
 
 
+#function to read a run's summary.csv into a dictionary, with the run directory name and path added
 def read_summary(path):
     d = {}
     with open(path) as fh:
@@ -25,6 +30,7 @@ def read_summary(path):
     return d
 
 
+#function to read a float from a summary dictionary, with a default when the key is missing or not a number
 def fnum(d, k, default=np.nan):
     try:
         return float(d[k])
@@ -32,6 +38,7 @@ def fnum(d, k, default=np.nan):
         return default
 
 
+#function to get the d0 mode label; old runs only had a use_d0 flag
 def d0_label(s):
     if "d0_mode" in s:
         return s["d0_mode"]
@@ -39,6 +46,8 @@ def d0_label(s):
     return "both" if v == "True" else ("none" if v == "False" else (v or ""))
 
 
+#function to collect the BDT and isolation-cut nMAX runs into dataframes
+#sorted by auc, keeping the best of duplicate configs; NN runs are skipped
 def collect():
     bdt, iso = [], []
     for path in glob.glob(os.path.join(OUTPUT, "**", "summary.csv"), recursive=True):
@@ -80,6 +89,7 @@ def collect():
     return bdt, iso
 
 
+#column headers for the table images
 HEADER = {
     "version": "Version", "dR": "ΔR", "dz": "dz", "K": "K", "d0": "d0", "iso": "Iso",
     "zeta": "ζ", "reweight": "Reweight", "depth": "Depth", "trees": "Trees", "lr": "LR",
@@ -89,6 +99,7 @@ HEADER = {
 }
 
 
+#function to draw a dataframe as a table image
 def render_table_image(df, cols, name, title, bw=False):
     disp = df[cols].copy()
     for c in disp.columns:
@@ -112,6 +123,7 @@ def render_table_image(df, cols, name, title, bw=False):
     fig.savefig(os.path.join(TABLES, f"{name}.png"), dpi=150, bbox_inches="tight"); plt.close(fig)
 
 
+#function to write a table as csv and image
 def write_table(df, name, title, cols, bw=False):
     if df.empty:
         print(f"  ({name}: no runs found)"); return
@@ -120,11 +132,13 @@ def write_table(df, name, title, cols, bw=False):
     print(f"  saved {name}.png / {name}.csv  ({len(df)} runs)")
 
 
+#d0 modes as (summary value, file suffix, plot phrase)
 D0_MODES = [("both", "d0both", "d0 On (Muon + Neighbor)"),
             ("muon-off", "d0muonoff", "Muon d0 Off (Neighbor d0 On)"),
             ("none", "d0none", "d0 Off (Muon + Neighbor)")]
 
 
+#function to plot the best holdout auc over (dR, dz) at K=10 for one d0 mode
 def plot_bdt_cone_heatmap(bdt, d0_mode, suffix, phrase):
     g = bdt[(bdt["K"] == 10) & (bdt["reweight"] == "True") & (bdt["zeta"] == "False")
             & (bdt["d0"] == d0_mode) & (bdt["dR"] <= 1.0)]
@@ -154,6 +168,7 @@ def plot_bdt_cone_heatmap(bdt, d0_mode, suffix, phrase):
     print(f"  saved {name}")
 
 
+#function to plot the best holdout auc vs cone dR for each d0 mode
 def plot_d0_vs_dr(bdt):
     g = bdt[(bdt["K"] == 10) & (bdt["reweight"] == "True") & (bdt["zeta"] == "False")]
     if g.empty:
@@ -174,6 +189,7 @@ def plot_d0_vs_dr(bdt):
     print("  saved bdt_d0_vs_dr.png")
 
 
+#function to plot the best holdout auc over (dR up to 5.0, d0 mode) at dz15
 def plot_bdt_cone_heatmap_dr5(bdt):
     short = {"both": "Both (μ+nbr)", "muon-off": "Muon Off", "none": "None"}
     g = bdt[(bdt["K"] == 10) & (bdt["reweight"] == "True") & (bdt["zeta"] == "False")
@@ -205,6 +221,7 @@ def plot_bdt_cone_heatmap_dr5(bdt):
     print("  saved bdt_cone_heatmap_dr_to5.png")
 
 
+#function to draw the neighbor capture panels (mean filled slots, saturation fraction) for one K
 def _render_capture(sub, K, dz, out_name):
     style = {"signal": ("steelblue", "Prompt Muon (Signal)"),
              "background": ("goldenrod", "Non-Prompt Muon (Background)")}
@@ -227,6 +244,7 @@ def _render_capture(sub, K, dz, out_name):
     print(f"  saved {out_name}")
 
 
+#function to plot the neighbor_capture.py csv if it exists, one figure per K
 def plot_neighbor_capture():
     src = os.path.join(OUTPUT, "neighbor_capture", "neighbor_capture.csv")
     if not os.path.exists(src):
@@ -240,6 +258,7 @@ def plot_neighbor_capture():
             _render_capture(sub, 10, dz, "bdt_neighbor_capture.png")
 
 
+#function to plot the best holdout auc vs tree depth for each cone with at least four depths, for one d0 mode
 def plot_bdt_depth(bdt, d0_mode, suffix, phrase):
     g = bdt[(bdt["K"] == 10) & (bdt["reweight"] == "True") & (bdt["zeta"] == "False")
             & (bdt["d0"] == d0_mode)].copy()
@@ -261,6 +280,7 @@ def plot_bdt_depth(bdt, d0_mode, suffix, phrase):
     print(f"  saved {name}")
 
 
+#function to plot the isolation-cut auc over (dR, dz)
 def plot_iso_heatmap(iso):
     if iso.empty:
         return
@@ -288,6 +308,7 @@ def plot_iso_heatmap(iso):
     print("  saved iso_cone_heatmap.png")
 
 
+#function to compare the best isolation cut with the best BDT overall
 def plot_comparison(bdt, iso):
     if bdt.empty or iso.empty:
         return
@@ -304,6 +325,7 @@ def plot_comparison(bdt, iso):
     print("  saved best_iso_vs_bdt.png")
 
 
+#function to compare the best isolation cut with the best BDT at physical cones (dR<=0.5)
 def plot_comparison_physical(bdt, iso):
     if bdt.empty or iso.empty:
         return
@@ -312,7 +334,7 @@ def plot_comparison_physical(bdt, iso):
         return
     bb = g["auc_holdout"].max(); bi = iso["auc_iso"].max()
     fig, ax = plt.subplots(figsize=(6, 5))
-    ax.bar(["Isolation Cut\n(Best Cone)", "BDT\n(Best, ΔR ≤ 0.5)"], [bi, bb],
+    ax.bar(["Isolation Cut\n(Best Cone)", "BDT\n(Best, ΔR <= 0.5)"], [bi, bb],
            color=["firebrick", "steelblue"], edgecolor="black")
     for x, v in enumerate([bi, bb]):
         ax.text(x, v + 0.005, f"{v:.4f}", ha="center", fontsize=12)
@@ -323,6 +345,7 @@ def plot_comparison_physical(bdt, iso):
     print("  saved best_iso_vs_bdt_physical.png")
 
 
+#function to copy a plot from a run directory into the tables folder
 def _copy_plot(row, fname, dest):
     src = os.path.join(os.path.dirname(row["path"]), fname)
     if os.path.exists(src):
@@ -331,6 +354,7 @@ def _copy_plot(row, fname, dest):
         print(f"  (missing {fname} for {dest})")
 
 
+#function to copy the roc and importance plots of the best runs into the tables folder
 def copy_best_plots(bdt, iso):
     if not bdt.empty:
         _copy_plot(bdt.iloc[0], "roc.png", "best_bdt_overall_roc.png")
@@ -351,6 +375,8 @@ def copy_best_plots(bdt, iso):
             _copy_plot(naive.iloc[0], "roc.png", "best_iso_nodz_roc.png")
 
 
+#main function
+#collect the runs, write the tables, make every plot, and copy the best run plots
 def main():
     os.makedirs(TABLES, exist_ok=True)
     bdt, iso = collect()
@@ -359,9 +385,9 @@ def main():
                 "reg_lambda", "mcw", "auc_train", "auc_holdout", "gap"]
     iso_cols = ["version", "dR", "dz", "n_sig", "n_bkg", "auc_iso", "youden_cut"]
     if not bdt.empty:
-        write_table(bdt, "bdt_runs", "BDT Runs (Max Events) — Sorted by Holdout AUC", bdt_cols, bw=True)
+        write_table(bdt, "bdt_runs", "BDT Runs (Max Events) - Sorted by Holdout AUC", bdt_cols, bw=True)
     if not iso.empty:
-        write_table(iso, "iso_runs", "Isolation-Cut Runs (Max Events) — Sorted by AUC", iso_cols, bw=True)
+        write_table(iso, "iso_runs", "Isolation-Cut Runs (Max Events) - Sorted by AUC", iso_cols, bw=True)
     if not bdt.empty:
         print(f"  best BDT:  holdout {bdt.iloc[0]['auc_holdout']:.4f}  "
               f"(ΔR<{bdt.iloc[0]['dR']:g}, dz<{bdt.iloc[0]['dz']:g}, K{bdt.iloc[0]['K']}, "
@@ -380,5 +406,6 @@ def main():
     print(f"\nall outputs in {TABLES}")
 
 
+#run main() only when executed as a script, not when imported
 if __name__ == "__main__":
     main()

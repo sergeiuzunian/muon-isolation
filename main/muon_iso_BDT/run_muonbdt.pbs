@@ -7,6 +7,7 @@
 #PBS -e /home/suzunyan/projects/muonisolation/job_logs/
 #PBS -m ae
 
+#muonBDT.py cone scan: depths 4/6/8 at dR0.5 dz20 for each d0 mode
 
 cd "$PBS_O_WORKDIR"
 source /home/suzunyan/.venv/bin/activate

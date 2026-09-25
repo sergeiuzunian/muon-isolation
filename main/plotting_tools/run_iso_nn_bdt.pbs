@@ -1,0 +1,18 @@
+#!/bin/bash
+#PBS -N iso_nn_bdt
+#PBS -l select=1:ncpus=1:mem=64gb
+#PBS -l walltime=04:00:00
+#PBS -q rqdf
+#PBS -o /home/suzunyan/projects/muonisolation/job_logs/
+#PBS -e /home/suzunyan/projects/muonisolation/job_logs/
+#PBS -m ae
+
+#iso_nn_bdt.py - overlay best BDT, NN, and isolation-cut ROC curves on one plot
+
+cd "$PBS_O_WORKDIR"
+source /home/suzunyan/.venv/bin/activate
+export OMP_NUM_THREADS=1
+
+python iso_nn_bdt.py
+
+echo "done"

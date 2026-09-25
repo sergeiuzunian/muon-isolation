@@ -1,0 +1,22 @@
+#!/bin/bash
+#PBS -N iso_vary
+#PBS -l select=1:ncpus=1:mem=64gb
+#PBS -l walltime=14:00:00
+#PBS -q rqdf
+#PBS -o /home/suzunyan/projects/muonisolation/job_logs/
+#PBS -e /home/suzunyan/projects/muonisolation/job_logs/
+#PBS -m ae
+
+#isoPLOT_vary.py - isolation-cut AUC vs cone dR for |dz0sintheta| window table variants
+#adds pt-3rd and pt-3.5th on the rising side of the pt-4th peak
+
+cd "$PBS_O_WORKDIR"
+source /home/suzunyan/.venv/bin/activate
+export OMP_NUM_THREADS=1
+
+python isoPLOT_vary.py \
+  --n-events 0 \
+  --dr-cuts 0.2,0.3,0.4,0.5 \
+  --modes default,eta-half,eta-double,pt-half,pt-3rd,pt-3.5th,pt-4th,pt-5th,pt-6th,pt-7th,pt-8th
+
+echo "done"

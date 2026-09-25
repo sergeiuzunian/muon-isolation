@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+#sample_spectra.py - Track pT Spectra of the Signal and Background Samples
+#all tracks, then muon vs non-muon tracks, on log binned and log scaled axes
+
+#modules for command line argument parsing, file handling, numerical operations, particle physics data handling, and plotting (Agg backend)
 import argparse
 import os
 import numpy as np
@@ -9,12 +13,16 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+#paths for signal and background samples; can be overridden with --signal-path and --bkg-path
 SIG_DEFAULT = "/lstr/sahara/niueftracking/kesedlac/muon_isolation/OUTPUT/run_InvPtPU200/"
 BKG_DEFAULT = "/lstr/sahara/niueftracking/kesedlac/muon_isolation/OUTPUT/run_bjet/"
-SIG_LABEL = "Signal — Prompt Muon Sample"
-BKG_LABEL = "Background — Non-Prompt Muon Sample"
+
+#module constants for labeling the two samples in plots
+SIG_LABEL = "Signal - Prompt Muon Sample"
+BKG_LABEL = "Background - Non-Prompt Muon Sample"
 
 
+#function to load track pT in GeV and the muon flag from a sample, flattened over events
 def load_pt_ismu(path, n_events):
     f = uproot.open(path + "OutputIsolation.root:OutputIsolation")
     stop = None if n_events <= 0 else n_events
@@ -24,6 +32,7 @@ def load_pt_ismu(path, n_events):
     return pt, ismu
 
 
+#function to make log-spaced bins from the pooled positive values, upper edge at the 99.5th percentile
 def log_bins(*arrays, n=60, lo_floor=0.1, qhi=0.995):
     pooled = np.concatenate([a[a > 0] for a in arrays])
     lo = max(lo_floor, float(np.min(pooled)))
@@ -31,6 +40,7 @@ def log_bins(*arrays, n=60, lo_floor=0.1, qhi=0.995):
     return np.logspace(np.log10(lo), np.log10(max(hi, lo * 2)), n)
 
 
+#function to apply the common axis style, with the 1 GeV track floor marked
 def _style(ax):
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel("Track pT [GeV]"); ax.set_ylabel("Normalized Counts")
@@ -38,6 +48,8 @@ def _style(ax):
     ax.legend(fontsize=9); ax.grid(alpha=0.3, which="both")
 
 
+#main function
+#load both samples, print track statistics, and save the two spectra figures
 def main():
     p = argparse.ArgumentParser(description="track pT spectra: signal vs background")
     p.add_argument("--signal-path", type=str, default=SIG_DEFAULT)
@@ -55,6 +67,7 @@ def main():
     print("loading background (run_bjet)...")
     pt_b, mu_b = load_pt_ismu(args.bkg_path, args.n_events)
 
+    #function to print track counts and non-muon pT statistics for a sample
     def stats(name, pt, mu):
         nm = pt[~mu]
         print(f"  {name:10s}: {pt.size:,} tracks ({mu.sum():,} muon), "
@@ -95,5 +108,6 @@ def main():
     print("done")
 
 
+#run main() only when executed as a script, not when imported
 if __name__ == "__main__":
     main()
