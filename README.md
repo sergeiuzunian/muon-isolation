@@ -1,4 +1,6 @@
-This repository includes code for undergraduate research conducted with the NIU ATLAS Group and the 2026 US-ATLAS SUPER REU program. We perform prompt vs non-prompt muon discrimination for the HL-LHC (pileup 200) on simulated reconstructed inner detector tracks, using track kinematics and impact parameters only (pT, eta, phi, z0sinθ, d0).
+This repository includes code for undergraduate research conducted with the NIU ATLAS Group and the 2026 US-ATLAS SUPER REU program. 
+
+We perform prompt vs non-prompt muon discrimination for the HL-LHC (pileup 200) on simulated reconstructed inner detector tracks, using track kinematics and impact parameters only (pT, eta, phi, z0sinθ, d0).
 
 Signal data consists of single prompt muons injected into pileup (9291 events, one muon each), and background consists of muons from b-hadron decays in HH(4b) events (9999 events); each candidate muon is described by its own parameters as well as up to K=10 (value may be changed in future work) neighboring tracks in a dR and |Δz0sinθ| cone around it.
 
