@@ -8,7 +8,7 @@ An XGBoost BDT and a small PyTorch MLP are trained on this feature vector (backg
 
 At the physical cone dR <= 0.5 the BDT and NN reach holdout AUC of 0.8822 and 0.8604 respectively. By contrast, the best scalar isolation threshold cut obtains an AUC of 0.7740, employing a numerically optimized eta and pT bin based longitudinal impact parameter cut.
 
-## Repository contents
+## Repository Contents
 
 main/ contains: 
 - muon_iso_BDT (xgboost classifier script), 
@@ -34,7 +34,7 @@ presentations/ contains:
 For users with access to the METIS HPC project directory:
 ARCHIVE/ (mostly erroneous code prior to 7/14/26) and job_logs/ exist locally but are not tracked. 
 
-## How to run
+## How To Run
 
 Python 3.12 venv with numpy, awkward, uproot, matplotlib, scipy, scikit-learn, xgboost, hep_ml, torch, pandas, tqdm (on METIS: `source ~/.venv/bin/activate`).
 
