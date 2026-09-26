@@ -1,92 +1,86 @@
-This repository includes code for undergraduate research conducted with the NIU ATLAS Group and the 2026 US-ATLAS SUPER REU program. 
+## Approaches to HL-LHC Prompt vs Non-Prompt Muon Track Discrimination
 
-We perform prompt vs non-prompt muon discrimination for the HL-LHC (pileup 200) on simulated reconstructed inner detector tracks, using track kinematics and impact parameters only (pT, eta, phi, z0sinθ, d0).
+Sergei Uzunian
+Advisors: Jahred Adelman, Kevin Sedlaczek
+Northern Illinois University ATLAS Group
+US-ATLAS SUPER, Summer 2026
 
-Signal data consists of single prompt muons injected into pileup (9291 events, one muon each), and background consists of muons from b-hadron decays in HH(4b) events (9999 events); each candidate muon is described by its own parameters as well as up to K=10 (value may be changed in future work) neighboring tracks in a dR and |Δz0sinθ| cone around it.
+### Introduction
 
-An XGBoost BDT and a small PyTorch MLP are trained on this feature vector (background reweighted to the signal muon (pT, eta), 80/20 split by event, holdout AUC only) and compared against a cut on relative track isolation summed over the same cone.
+The Large Hadron Collider (LHC) is expected to begin Run 5 with pileup ⟨μ⟩ ≈ 200 around the late 2030's following the High Luminosity (HL) upgrade. The significant increase in simultaneous proton-proton collisions complicates the problem of distinguishing between prompt and non-prompt lepton tracks, including muons. Prompt leptons emerge from the decays of electroweak and Higgs bosons, whereas non-prompt muons tend to arise in hadron decays.
 
-At the physical cone dR <= 0.5 the BDT and NN reach holdout AUC of 0.8822 and 0.8604 respectively. By contrast, the best scalar isolation threshold cut obtains an AUC of 0.7740, employing a numerically optimized eta and pT bin based longitudinal impact parameter cut.
+As a part of US-ATLAS SUPER, I have developed and compared the viability of an XGBoost Boosted Decision Tree (BDT) and a PyTorch Neural Network for prompt vs non-prompt muon track discrimination at HL-LHC pileup, operating on inner detector track information only: the reconstructed muon's own kinematics and impact parameters together with those of nearby tracks. While more sophisticated than standard isolation scalar cut-based discrimination (wherein relative isolation for a candidate muon is summed over a ΔR cone and scanned by threshold), these approaches remain considerably simpler than the transformer-based architectures developed for Runs 2 and 3, and outperform the isolation scalar threshold cut baseline.
 
-## Repository Contents
+### Principal Results
 
-main/ contains: 
-- muon_iso_BDT/ (xgboost classifier script), 
-- muon_iso_NN/ (pyTorch classifier script),
-- muon_iso_cut/ (cut based isolation script),
-- plotting_tools/ (scripts that read run outputs).
+Following my advisor's guidance, the analysis is restricted to a physically motivated cone ΔR ≤ 0.5 (the jet scale), since the holdout AUC continues to rise with cone radius well beyond it in a manner that cannot reflect genuine isolation physics. At this cone the BDT reaches a holdout AUC of 0.8822, against 0.8604 for the Neural Network and 0.7740 for the best cut-based isolation.
 
-The classifier scripts, the isolation scripts, and the ROC overlay and rejection table plotting tools have batch wrapper pbs files next to them.
+Feature importances show that most of the discrimination is carried by the surrounding track activity rather than by the muon's own parameters. Consistent with this, the muon's own d0 gives a small gain (0.8822 with vs 0.8744 without), the neighboring-track d0 is negligible (0.8744 vs 0.8760 with d0 removed everywhere), and the optional isolation scalar and ζ-ordering add +0.000 and +0.0004 respectively, being already captured by the neighbor-track features. The improvement over the cut-based isolation is therefore attributable almost entirely to the models' access to the per-track kinematics of the cone (each neighbor's pT, ΔR, Δη and Δz0 sin θ), as opposed to a single pT sum taken behind a fixed |Δz0 sin θ| window.
 
-Every run writes a settings-named directory under output/; summarize_runs.py collects them into dated summary_tables folders.
+### Samples
 
-notebooks/ contains:
-- Original NIU ATLAS group introductory information Jupyter Notebook (prior to machine learning work).
+Training data was simulated for HL-LHC ⟨μ⟩ = 200 with a signal sample of single prompt muons with pileup and a background of non-prompt muons from b-hadron decays in HH(4b) events. Signal consisted of 9,291 events (one prompt muon per event) and background of 9,999 events with ∼1,970 tracks per event. Each event stores a list of reconstructed inner-detector tracks including per-track kinematics pT, η, φ and impact parameter values z0 sin θ (longitudinal) and d0 (transverse), with an `isMuon` flag identifying the reconstructed muons. Tracks below 1 GeV are dropped. The input ntuples are not distributed with this repository.
 
-output/ contains:
-- Past outputs of BDT and Neural Network models and plotting tools (ROC plots, loss plots, feature importances, csv summaries, etc.).
+### Methodology
 
-presentations/ contains:
-- Slides from CERN Isolation and Fakes Forum presentation, given July 27, 2026,
-- Slides from US-ATLAS SUPER REU program symposium presentation, given August 20, 2026,
-- Final Project Report for US-ATLAS SUPER REU.
+For the machine learning approaches, each candidate is a reconstructed muon. The candidate's feature vector consists of the muon's own pT, η, |z0 sin θ| and d0 together with a block of up to K = 10 neighboring tracks from a cone defined by ΔR and |Δz0 sin θ| about the candidate, each neighbor carrying its d0, pT, Δη, ΔR and Δz0 sin θ relative to the muon. Since the number of tracks inside the cone varies between events, the neighbor slots are filled in two orderings (ΔR-ascending and pT-descending), with unfilled slots NaN-padded for the BDT (handled natively by the XGBoost library) and zero-padded for the Neural Network.
 
-For users with access to the METIS HPC project directory:
-ARCHIVE/ (mostly erroneous code prior to 7/14/26) and job_logs/ exist locally but are not tracked. 
+Two kinds of reweighting are combined into one per-muon training weight. The first is kinematic: since the samples differ in their muon (pT, η) spectra, a gradient-boosted reweighter (`hep_ml`, fit on the training set only) weights the background so that its muon (pT, η) distribution matches signal, preventing separation on sample kinematics instead of isolation. The second corrects class imbalance, upweighting each signal muon by n_bkg/n_sig ≈ 62 (∼465k background vs ∼7.5k signal training muons).
 
-## How To Run
+The data is split 80/20 by event into training and holdout sets, and all quoted performance is the holdout AUC, with the training/holdout AUC gap used as the overfitting benchmark. Youden's J = TPR − FPR, maximized over the classification score threshold, provides a distinguished operating point weighting correct identification of prompt muons and rejection of non-prompt muons equally.
 
-Python 3.12 venv with numpy, awkward, uproot, matplotlib, scipy, scikit-learn, xgboost, hep_ml, torch, pandas, tqdm (on METIS: `source ~/.venv/bin/activate`).
+The Neural Network is a PyTorch multilayer perceptron of 105 → 15 → 15 → 1 with ReLU hidden layers and ∼1,850 parameters, trained with weighted cross-entropy and the Adam optimizer on the same inputs, preprocessing and split as the BDT, with the epoch of maximum holdout AUC taken as the stopping point.
 
-Samples: each script reads `<path>/OutputIsolation.root:OutputIsolation` with the branches InDetTrack_pt, InDetTrack_eta, InDetTrack_phi, InDetTrack_z0sinTheta, InDetTrack_d0, isMuon. Defaults point at run_InvPtPU200 (signal) and run_bjet (background) on /lstr/sahara; override with `--signal-path` and `--bkg-path`. `--n-events 0` loads everything (the nMAX runs in output/), the default 2000 is for quick tests.
+The cut-based baseline computes relative track isolation Σ pT(cone) / pT(μ) over the same cone, scanned over ΔR and the |Δz0 sin θ| window for the best-performing isolation value, and serves as a proxy for any cut-based isolation tool. The window may alternatively be taken from a heuristic-motivated table developed by the NIU ATLAS group, which sets each nearby track's |Δz0 sin θ| requirement on the basis of its pT and η. Following a question asked at the CERN Isolation and Fakes Forum, the table's bin values were rescaled and the cone rescanned for each variant; dividing the pT bin values by three raised the best isolation AUC from 0.7510 to 0.7740, corresponding to a systematically wider |Δz0 sin θ| window than the original prescription.
 
-Every run writes a settings-named directory under output/ (a _runN suffix is added instead of overwriting) with its plots, summary.csv and model. Every plot carries a run-settings box.
+### Limitations
 
-Batch: the classifier and isolation scripts, ROC overlay, and rejection table tools have a pbs wrapper next to them. Submit from the script's own directory (the wrapper cds to $PBS_O_WORKDIR) and create job_logs/ first. The job logs are not tracked on github.
+Arguably the clearest limitation of the present work is the signal sample itself, in which the prompt muon is added directly without a simulated decay event. A natural next step is to train on samples in which prompt muons emerge from actual W, Z or Higgs decays, paired with a greater sample size.
 
-```
-mkdir -p job_logs
-cd main/muon_iso_BDT && qsub run_muonbdt.pbs
-```
+The comparative performance metric used throughout this project is the area under the Receiver Operating Characteristic curve (ROC AUC), rather than non-prompt rejection at fixed prompt-efficiency working points, which would be the intended basis for eventual comparison against the isolation taggers used by ATLAS when more physical simulations of signal samples become available and the signal/background sample sizes are increased.
 
-BDT, best physical cone (main/muon_iso_BDT):
+### Repository Layout
 
-```
-python muonBDT.py --n-events 0 --neighbor-dr-cut 0.5 --neighbor-dz-cut 10 --max-neighbors 10 --d0-mode both \
-    --config "max_depth=3,n_estimators=200,learning_rate=0.10,reg_lambda=1,min_child_weight=1"
-```
+`main/` contains:
 
-Repeat `--config` to fit several hyperparameter sets on one feature build (scan mode: output/muonbdt_scan_*/cfgNN_*/ plus scan_summary.csv). Feature switches: `--d0-mode both|muon-off|none`, `--use-isolation`, `--use-zeta-order`, `--use-neighbors`, `--use-gbreweighter`. Writes roc.png, importances.png, score and feature distributions, model.pkl, summary.csv.
+- `muon_iso_BDT/`: `muonBDT.py`, the XGBoost classifier script, with `run_muonbdt.pbs` and `run_isozeta.pbs`
+- `muon_iso_NN/`: `muonNN.py` and `muonNN_small.py`, the PyTorch classifier scripts, with `run_muonnn.pbs`
+- `muon_iso_cut/`: `isoPLOT.py` and `isoPLOT_vary.py`, the cut-based isolation scripts, with `run_isoplot.pbs` and `run_isovary.pbs`
+- `plotting_tools/`: scripts which read run outputs (ROC overlays, rejection tables, tree-depth and network-architecture scans, neighbor-capture and sample-spectra plots) together with `summarize_runs.py`
 
-NN, best configuration (main/muon_iso_NN), same cone and feature flags as the BDT:
+Each subfolder of `main/` pairs its Python script with one batch wrapper PBS file. Every run writes a settings-named directory under `output/`, and `summarize_runs.py` collects them into dated `summary_tables` folders. Approximately 340 run directories are tracked. A standardized run-settings box is added to every plot and every run also writes a summary file, so that the output of any run can be traced to the settings which produced it.
 
-```
-python muonNN.py --n-events 0 --neighbor-dr-cut 0.5 --neighbor-dz-cut 10 --max-neighbors 10 --d0-mode both \
-    --hidden1 15 --hidden2 15 --epochs 21 --batch-size 512 --learning-rate 0.001
-```
+`notebooks/` contains the original NIU ATLAS group introductory Jupyter notebook, `test_input_files.ipynb`, prior to the machine learning work.
 
-Writes roc.png, loss_vs_epoch.png, auc_vs_epoch.png, model.pt, summary.csv (includes the best epoch).
+`presentations/` contains:
 
-Isolation cut (main/muon_iso_cut):
+- Slides from the CERN Isolation and Fakes Forum presentation, given July 27, 2026
+- Slides from the US-ATLAS SUPER program symposium presentation, given August 20, 2026
+- The Final Project Report for US-ATLAS SUPER
 
-```
-python isoPLOT.py --n-events 0 --iso-dr-cut 0.4 --iso-dz-cut auto        # dz: none, auto (pT,|eta| table) or a value in mm
-python isoPLOT_vary.py --n-events 0 --dr-cuts 0.2,0.3,0.4,0.5 --modes default,pt-half,pt-3rd,pt-4th
-python isoPLOT_vary.py --replot-dir ../../output/iso_table_vary_v1.0_nMAX   # redraw the summary plot from its csv
+`ARCHIVE/` (mostly erroneous code prior to July 14, 2026) and `job_logs/` exist locally and are not tracked.
+
+### Running the Code
+
+The PBS wrappers were written for the NIU METIS cluster and record the configurations which were actually run. The BDT at the reported settings may be run directly as
+
+```bash
+python main/muon_iso_BDT/muonBDT.py --n-events 0 \
+    --neighbor-dr-cut 0.5 --neighbor-dz-cut 15 --max-neighbors 10 \
+    --d0-mode both --use-isolation true --use-gbreweighter true \
+    --config "max_depth=3,n_estimators=200,learning_rate=0.10"
 ```
 
-Plotting tools (main/plotting_tools) to run once the runs above exist:
+where `--n-events 0` selects all events. The Neural Network script accepts the same feature and reweighting arguments together with `--epochs`, `--hidden1` and `--hidden2`. The cut-based baseline is run as `isoPLOT.py --iso-dr-cut 0.4 --iso-dz-cut auto`, where `auto` selects the |Δz0 sin θ| window table.
 
-```
-python summarize_runs.py      # every nMAX summary.csv -> output/summary_tables_<date>/ (tables, heatmaps, best plots)
-python bdt_depth_plot.py      # AUC vs tree depth from the dz10 d0on scans
-python nn_arch_heatmap.py     # NN holdout AUC over hidden widths
-python nn_best_epoch.py       # best epoch per NN configuration
-python neighbor_capture.py --n-events 0 --dz-cut 15 --max-neighbors 10 20 30 40 50   # slot filling vs dR, plotted by summarize_runs.py
-python sample_spectra.py      # track pT spectra of the two samples
-python iso_bdt_roc.py         # isolation vs BDT ROC overlay
-python nn_bdt_roc.py          # BDT vs NN ROC overlay
-python iso_nn_bdt.py          # BDT vs NN vs isolation ROC overlay with Youden J
-python nn_roc_youden.py       # best NN ROC with Youden J markers
-python rejection_table.py     # non-prompt rejection at fixed prompt efficiency, rejection_table.csv
-```
+The feature switches shared by the BDT and Neural Network scripts are as follows.
+
+| Flag | Values | Description |
+|---|---|---|
+| `--d0-mode` | `both`, `muon-off`, `none` | Whether d0 is included for the muon and its neighbors, for the neighbors only, or for neither |
+| `--use-neighbors` | `true`, `false` | Whether the K-neighbor block is included |
+| `--use-isolation` | `true`, `false` | Whether the summed isolation scalar is included as an additional feature |
+| `--use-zeta-order` | `true`, `false` | Whether a third neighbor ordering by ζ = √((20ΔR)² + (Δz0 sin θ)²) is included |
+| `--use-gbreweighter` | `true`, `false` | Whether the kinematic (pT, η) reweighting is applied |
+
+Dependencies: `uproot`, `awkward`, `numpy`, `xgboost`, `torch`, `scikit-learn`, `hep_ml`, `scipy`, `matplotlib`, `tqdm`.
