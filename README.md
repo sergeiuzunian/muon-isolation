@@ -1,8 +1,8 @@
 ## Approaches to HL-LHC Prompt vs Non-Prompt Muon Track Discrimination
 
-Sergei Uzunian
-Advisors: Jahred Adelman, Kevin Sedlaczek
-Northern Illinois University ATLAS Group
+Sergei Uzunian\
+Advisors: Jahred Adelman, Kevin Sedlaczek\
+Northern Illinois University ATLAS Group\
 US-ATLAS SUPER, Summer 2026
 
 ### Introduction
